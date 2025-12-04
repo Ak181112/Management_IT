@@ -85,6 +85,23 @@ class EmployeeService {
           _lastSalaryPaid = DateTime.parse(lastPaid);
         } catch (_) {}
       }
+      // load salary payments history
+      final paymentsJson = prefs.getString('salary_payments');
+      if (paymentsJson != null && paymentsJson.isNotEmpty) {
+        try {
+          final List<dynamic> list = jsonDecode(paymentsJson);
+          _salaryPayments.clear();
+          for (final p in list) {
+            try {
+              final map = p as Map<String, dynamic>;
+              _salaryPayments.add({
+                'date': DateTime.parse(map['date'] as String),
+                'total': (map['total'] as num).toDouble(),
+              });
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }
       if (jsonStr != null && jsonStr.isNotEmpty) {
         final List<dynamic> list = jsonDecode(jsonStr);
         _employees.clear();
@@ -111,6 +128,32 @@ class EmployeeService {
     }
   }
 
+  // salary payments history (each entry: {'date': DateTime, 'total': double})
+  static final List<Map<String, dynamic>> _salaryPayments = [];
+
+  static List<Map<String, dynamic>> getSalaryPayments() => List.unmodifiable(
+    _salaryPayments.map(
+      (m) => {'date': m['date'] as DateTime, 'total': m['total'] as double},
+    ),
+  );
+
+  static Future<void> _persistSalaryPayments() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final encoded = jsonEncode(
+        _salaryPayments
+            .map(
+              (m) => {
+                'date': (m['date'] as DateTime).toIso8601String(),
+                'total': m['total'],
+              },
+            )
+            .toList(),
+      );
+      await prefs.setString('salary_payments', encoded);
+    } catch (_) {}
+  }
+
   static DateTime? _lastSalaryPaid;
 
   static DateTime? getLastSalaryPaid() => _lastSalaryPaid;
@@ -121,6 +164,11 @@ class EmployeeService {
       await prefs.setString('salary_last_paid', dt.toIso8601String());
       _lastSalaryPaid = dt;
     } catch (_) {}
+  }
+
+  static void _addSalaryPaymentRecord(DateTime date, double total) {
+    _salaryPayments.insert(0, {'date': date, 'total': total});
+    _persistSalaryPayments();
   }
 
   static List<Employee> getEmployees() => List.unmodifiable(_employees);
@@ -195,13 +243,16 @@ class EmployeeService {
   // Mark salaries as paid now
   static Future<void> markSalariesPaidNow() async {
     final now = DateTime.now();
+    final prepared = prepareSalaryPayouts();
+    final total = prepared['total'] as double;
     await _setLastSalaryPaid(now);
+    _addSalaryPaymentRecord(now, total);
   }
 
-  // Check if salaries can be paid now (only once per month and between day 5-10)
+  // Check if salaries can be paid now (only once per month and between day 3-10)
   static bool canPaySalariesNow() {
     final now = DateTime.now();
-    if (now.day < 4|| now.day > 10) return false;
+    if (now.day < 3 || now.day > 10) return false;
     if (_lastSalaryPaid != null) {
       if (_lastSalaryPaid!.year == now.year &&
           _lastSalaryPaid!.month == now.month) {
