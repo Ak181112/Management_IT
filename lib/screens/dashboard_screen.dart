@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../services/auth_service.dart';
@@ -462,68 +463,261 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final dobCtrl = TextEditingController(text: AuthService.dob);
     final emailCtrl = TextEditingController(text: AuthService.email);
     final mobileCtrl = TextEditingController(text: AuthService.mobile);
+    String? selectedImagePath = AuthService.avatarPath;
 
     showDialog<void>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Edit Profile'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: fnCtrl,
-                  decoration: const InputDecoration(labelText: 'First Name'),
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Edit Profile'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Profile Image Section
+                    Center(
+                      child: Column(
+                        children: [
+                          GestureDetector(
+                            onTap: () async {
+                              showModalBottomSheet(
+                                context: context,
+                                builder: (context) => Container(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text(
+                                        'Select Image Source',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceEvenly,
+                                        children: [
+                                          Column(
+                                            children: [
+                                              CircleAvatar(
+                                                radius: 30,
+                                                backgroundColor:
+                                                    Colors.blue[100],
+                                                child: IconButton(
+                                                  icon: const Icon(
+                                                    Icons.camera_alt,
+                                                    color: Colors.blue,
+                                                  ),
+                                                  onPressed: () async {
+                                                    Navigator.pop(context);
+                                                    final picker =
+                                                        ImagePicker();
+                                                    final pickedFile =
+                                                        await picker.pickImage(
+                                                          source: ImageSource
+                                                              .camera,
+                                                        );
+                                                    if (pickedFile != null) {
+                                                      setDialogState(() {
+                                                        selectedImagePath =
+                                                            pickedFile.path;
+                                                      });
+                                                    }
+                                                  },
+                                                ),
+                                              ),
+                                              const SizedBox(height: 8),
+                                              const Text('Camera'),
+                                            ],
+                                          ),
+                                          Column(
+                                            children: [
+                                              CircleAvatar(
+                                                radius: 30,
+                                                backgroundColor:
+                                                    Colors.green[100],
+                                                child: IconButton(
+                                                  icon: const Icon(
+                                                    Icons.image,
+                                                    color: Colors.green,
+                                                  ),
+                                                  onPressed: () async {
+                                                    Navigator.pop(context);
+                                                    final picker =
+                                                        ImagePicker();
+                                                    final pickedFile =
+                                                        await picker.pickImage(
+                                                          source: ImageSource
+                                                              .gallery,
+                                                        );
+                                                    if (pickedFile != null) {
+                                                      setDialogState(() {
+                                                        selectedImagePath =
+                                                            pickedFile.path;
+                                                      });
+                                                    }
+                                                  },
+                                                ),
+                                              ),
+                                              const SizedBox(height: 8),
+                                              const Text('Gallery'),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                            child: CircleAvatar(
+                              radius: 60,
+                              backgroundColor: Colors.grey[300],
+                              backgroundImage:
+                                  (selectedImagePath != null &&
+                                      selectedImagePath!.isNotEmpty)
+                                  ? FileImage(File(selectedImagePath!))
+                                  : null,
+                              child:
+                                  (selectedImagePath == null ||
+                                      selectedImagePath!.isEmpty)
+                                  ? Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: const [
+                                        Icon(
+                                          Icons.camera_alt,
+                                          size: 30,
+                                          color: Colors.grey,
+                                        ),
+                                        SizedBox(height: 4),
+                                        Text(
+                                          'Tap to\nchange',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : Stack(
+                                      alignment: Alignment.bottomRight,
+                                      children: [
+                                        Container(),
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          padding: const EdgeInsets.all(6),
+                                          child: const Icon(
+                                            Icons.edit,
+                                            size: 16,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: fnCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'First Name',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: lnCtrl,
+                      decoration: const InputDecoration(labelText: 'Last Name'),
+                    ),
+                    const SizedBox(height: 12),
+                    // Date of Birth with Date Picker
+                    TextField(
+                      controller: dobCtrl,
+                      readOnly: true,
+                      decoration: InputDecoration(
+                        labelText: 'Date of Birth',
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.calendar_today),
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: DateTime.parse(
+                                dobCtrl.text.isNotEmpty
+                                    ? dobCtrl.text
+                                    : '2000-01-01',
+                              ),
+                              firstDate: DateTime(1950),
+                              lastDate: DateTime.now(),
+                            );
+                            if (picked != null) {
+                              setDialogState(() {
+                                dobCtrl.text = DateFormat(
+                                  'yyyy-MM-dd',
+                                ).format(picked);
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: emailCtrl,
+                      decoration: const InputDecoration(labelText: 'Email'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: mobileCtrl,
+                      decoration: const InputDecoration(labelText: 'Mobile'),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: lnCtrl,
-                  decoration: const InputDecoration(labelText: 'Last Name'),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('Cancel'),
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: dobCtrl,
-                  decoration: const InputDecoration(labelText: 'Date of Birth'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: emailCtrl,
-                  decoration: const InputDecoration(labelText: 'Email'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: mobileCtrl,
-                  decoration: const InputDecoration(labelText: 'Mobile'),
+                TextButton(
+                  onPressed: () {
+                    AuthService.updateProfile(
+                      newFirstName: fnCtrl.text,
+                      newLastName: lnCtrl.text,
+                      newDob: dobCtrl.text,
+                      newEmail: emailCtrl.text,
+                      newMobile: mobileCtrl.text,
+                      newAvatarPath: selectedImagePath,
+                    );
+                    Navigator.of(context).pop();
+                    setState(() {});
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Profile updated successfully'),
+                      ),
+                    );
+                  },
+                  child: const Text(
+                    'Save',
+                    style: TextStyle(color: Colors.blue),
+                  ),
                 ),
               ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                AuthService.updateProfile(
-                  newFirstName: fnCtrl.text,
-                  newLastName: lnCtrl.text,
-                  newDob: dobCtrl.text,
-                  newEmail: emailCtrl.text,
-                  newMobile: mobileCtrl.text,
-                );
-                Navigator.of(context).pop();
-                setState(() {});
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Profile updated successfully')),
-                );
-              },
-              child: const Text('Save', style: TextStyle(color: Colors.blue)),
-            ),
-          ],
+            );
+          },
         );
       },
     );

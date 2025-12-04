@@ -558,11 +558,11 @@ class _EmployeePageState extends State<EmployeePage> {
   void _onPaySalaries() async {
     final now = DateTime.now();
     // check date window
-    if (now.day < 5 || now.day > 10) {
+    if (now.day < 3 || now.day > 10) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Salaries can only be paid between day 5 and 10 of the month',
+            'Salaries can only be paid between day 3 and 10 of the month',
           ),
         ),
       );
