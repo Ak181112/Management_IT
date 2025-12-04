@@ -18,24 +18,14 @@ class LoginButton extends StatelessWidget {
       height: 50,
       child: ElevatedButton(
         onPressed: () {
-          // --- NAVIGATION IMPLEMENTATION ---
-          // TODO: Add actual login validation logic here first.
-          // For now, we assume successful login and navigate.
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const DashboardScreen(), // Navigate to Dashboard
-            ),
-          );
-          //----------------------------------------
           final enteredUser = userController.text.trim();
           final enteredPass = passwordController.text;
 
           if (AuthService.verify(enteredUser, enteredPass)) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(const SnackBar(content: Text('Login successful')));
-            // TODO: Proceed to next screen on successful login
+            // Navigate to dashboard and remove login from stack
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => const DashboardScreen()),
+            );
           } else {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('User ID or password is wrong')),
@@ -48,7 +38,7 @@ class LoginButton extends StatelessWidget {
           elevation: 0,
         ),
         child: const Text(
-          'Login In',
+          'Login',
           style: TextStyle(
             color: Colors.white,
             fontSize: 18,
