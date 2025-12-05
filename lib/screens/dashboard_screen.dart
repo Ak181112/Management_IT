@@ -32,8 +32,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (jd == null) continue;
       for (int i = 0; i < 12; i++) {
         final monthDate = DateTime(now.year, now.month - 11 + i, 1);
-        if (jd.year == monthDate.year && jd.month == monthDate.month)
+        if (jd.year == monthDate.year && jd.month == monthDate.month) {
           counts[i]++;
+        }
       }
     }
     return counts;
@@ -47,8 +48,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final jd = e.joinedDate;
       for (int i = 0; i < 12; i++) {
         final monthDate = DateTime(now.year, now.month - 11 + i, 1);
-        if (jd.year == monthDate.year && jd.month == monthDate.month)
+        if (jd.year == monthDate.year && jd.month == monthDate.month) {
           counts[i]++;
+        }
       }
     }
     return counts;
@@ -358,7 +360,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           style: const TextStyle(fontSize: 11),
                         ),
                       );
-                    }).toList(),
+                    }),
                   ],
                 ),
               ),
@@ -430,7 +432,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           style: const TextStyle(fontSize: 12),
                         ),
                       );
-                    }).toList(),
+                    }),
                   ],
                 ),
               ),
@@ -928,8 +930,7 @@ class _MiniLineChart extends StatelessWidget {
   final List<double>? seriesB;
   final List<int>? points;
 
-  const _MiniLineChart._(this.seriesA, this.seriesB, this.points, {Key? key})
-    : super(key: key);
+  const _MiniLineChart._(this.seriesA, this.seriesB, this.points, {super.key});
 
   factory _MiniLineChart.points(List<int> pts) {
     return _MiniLineChart._(pts.map((e) => e.toDouble()).toList(), null, pts);

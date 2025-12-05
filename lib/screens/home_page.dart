@@ -30,8 +30,9 @@ class _HomePageState extends State<HomePage> {
       if (jd == null) continue;
       for (int i = 0; i < 12; i++) {
         final monthDate = DateTime(now.year, now.month - 11 + i, 1);
-        if (jd.year == monthDate.year && jd.month == monthDate.month)
+        if (jd.year == monthDate.year && jd.month == monthDate.month) {
           counts[i]++;
+        }
       }
     }
     return counts;
@@ -45,8 +46,9 @@ class _HomePageState extends State<HomePage> {
       final jd = e.joinedDate;
       for (int i = 0; i < 12; i++) {
         final monthDate = DateTime(now.year, now.month - 11 + i, 1);
-        if (jd.year == monthDate.year && jd.month == monthDate.month)
+        if (jd.year == monthDate.year && jd.month == monthDate.month) {
           counts[i]++;
+        }
       }
     }
     return counts;
@@ -338,7 +340,7 @@ class _HomePageState extends State<HomePage> {
                           ),
                           trailing: Text('Stock: ${prod.currentStock}'),
                         );
-                      }).toList(),
+                      }),
                     ],
                   ),
                 ),
@@ -405,7 +407,7 @@ class _HomePageState extends State<HomePage> {
                           title: Text(DateFormat('yyyy-MM-dd').format(dt)),
                           trailing: Text('LKR ${total.toStringAsFixed(2)}'),
                         );
-                      }).toList(),
+                      }),
                     ],
                   ),
                 ),
@@ -425,7 +427,7 @@ class _MiniLineChart extends StatelessWidget {
   final List<double>? seriesB;
   final List<int>? points;
 
-  const _MiniLineChart._(this.seriesA, this.seriesB, this.points, {super.key});
+  const _MiniLineChart._(this.seriesA, this.seriesB, this.points);
 
   factory _MiniLineChart.points(List<int> pts) {
     return _MiniLineChart._(pts.map((e) => e.toDouble()).toList(), null, pts);
@@ -472,10 +474,11 @@ class _MiniPainter extends CustomPainter {
     for (int i = 0; i < a.length; i++) {
       final x = stepX * i;
       final y = size.height - ((a[i] / span) * size.height);
-      if (i == 0)
+      if (i == 0) {
         pathA.moveTo(x, y);
-      else
+      } else {
         pathA.lineTo(x, y);
+      }
       canvas.drawCircle(Offset(x, y), 2, dot);
     }
     canvas.drawPath(pathA, paintA);
@@ -488,10 +491,11 @@ class _MiniPainter extends CustomPainter {
       for (int i = 0; i < b!.length; i++) {
         final x = stepXB * i;
         final y = size.height - ((b![i] / spanB) * size.height);
-        if (i == 0)
+        if (i == 0) {
           pathB.moveTo(x, y);
-        else
+        } else {
           pathB.lineTo(x, y);
+        }
       }
       canvas.drawPath(pathB, paintB);
     }

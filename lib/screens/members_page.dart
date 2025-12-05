@@ -807,7 +807,7 @@ class _MembersPageState extends State<MembersPage> {
 
 class _SimpleLineChart extends StatelessWidget {
   final List<int> points;
-  const _SimpleLineChart({super.key, required this.points});
+  const _SimpleLineChart({required this.points});
 
   @override
   Widget build(BuildContext context) {
