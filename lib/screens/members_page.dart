@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
@@ -838,7 +837,7 @@ class _LineChartPainter extends CustomPainter {
     if (points.isEmpty) return;
 
     final maxVal = points.reduce((a, b) => a > b ? a : b).toDouble();
-    final minVal = 0.0;
+    const minVal = 0.0;
     final span = (maxVal - minVal) == 0 ? 1.0 : (maxVal - minVal);
 
     final stepX = size.width / (points.length - 1).clamp(1, double.infinity);

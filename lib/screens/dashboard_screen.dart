@@ -587,10 +587,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               child:
                                   (selectedImagePath == null ||
                                       selectedImagePath!.isEmpty)
-                                  ? Column(
+                                  ? const Column(
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
-                                      children: const [
+                                      children: [
                                         Icon(
                                           Icons.camera_alt,
                                           size: 30,
@@ -612,7 +612,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       children: [
                                         Container(),
                                         Container(
-                                          decoration: BoxDecoration(
+                                          decoration: const BoxDecoration(
                                             color: Colors.blue,
                                             shape: BoxShape.circle,
                                           ),
@@ -930,7 +930,7 @@ class _MiniLineChart extends StatelessWidget {
   final List<double>? seriesB;
   final List<int>? points;
 
-  const _MiniLineChart._(this.seriesA, this.seriesB, this.points, {super.key});
+  const _MiniLineChart._(this.seriesA, this.seriesB, this.points);
 
   factory _MiniLineChart.points(List<int> pts) {
     return _MiniLineChart._(pts.map((e) => e.toDouble()).toList(), null, pts);
@@ -959,7 +959,7 @@ class _MiniPainter extends CustomPainter {
     if (a.isEmpty || size.width <= 0 || size.height <= 0) return;
 
     // Add padding to prevent drawing outside bounds
-    final padding = 4.0;
+    const padding = 4.0;
     final drawWidth = size.width - (padding * 2);
     final drawHeight = size.height - (padding * 2);
 

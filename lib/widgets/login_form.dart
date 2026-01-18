@@ -294,7 +294,7 @@ class _LoginFormState extends State<LoginForm> {
       children: <Widget>[
         // Title Text
         const Text(
-          'Wel Come Back!!!!',
+          'Welcome Back!',
           style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
           textAlign: TextAlign.left,
         ),
