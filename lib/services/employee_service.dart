@@ -1,18 +1,24 @@
-import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class Employee {
-  String id;
-  String firstName;
-  String lastName;
-  DateTime dob; // Date of birth
-  String position; // 'Field Visitor', 'Manager', 'IT Sector'
-  double salary; // Monthly salary in LKR
-  String branch;
-  DateTime joinedDate; // When employee joined
+  // Use userId for the functional ID (e.g. MGR-KM-000001)
+  String userId;
+  String fullName;
+  String email;
+  String phone;
+  DateTime dob;
+  String role; // 'manager', 'field_visitor', 'it_sector'
+  String position; // Display name
+  double salary;
+  String branchName;
+  String branchId;
+  DateTime joinedDate;
+  String password; // Only for creation payload really, usually not returned
+  String status;
+
   // Bank details
   String bankName;
   String bankBranch;
@@ -20,14 +26,19 @@ class Employee {
   String accountHolder;
 
   Employee({
-    required this.id,
-    required this.firstName,
-    required this.lastName,
+    this.userId = '', // Assigned by backend
+    required this.fullName,
+    required this.email,
+    required this.phone,
     required this.dob,
-    required this.position,
+    required this.role,
+    this.position = '',
     required this.salary,
-    required this.branch,
+    required this.branchName,
+    this.branchId = '',
     required this.joinedDate,
+    this.password = '',
+    this.status = 'active',
     this.bankName = '',
     this.bankBranch = '',
     this.accountNo = '',
@@ -41,46 +52,63 @@ class Employee {
   }
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'firstName': firstName,
-    'lastName': lastName,
+    'userId': userId,
+    'fullName': fullName,
+    'email': email,
+    'phone': phone,
     'dob': dob.toIso8601String(),
+    'role': role,
     'position': position,
     'salary': salary,
-    'branch': branch,
+    'branchName': branchName,
+    'branchId': branchId,
+    'joinedDate': joinedDate.toIso8601String(),
+    'status': status,
     'bankName': bankName,
     'bankBranch': bankBranch,
     'accountNo': accountNo,
     'accountHolder': accountHolder,
-    'joinedDate': joinedDate.toIso8601String(),
   };
 
   factory Employee.fromJson(Map<String, dynamic> m) => Employee(
-    id:
-        m['id'] as String? ??
-        (m['_id'] as String? ?? ''), // Handling mongo _id vs id
-    firstName: m['firstName'] as String,
-    lastName: m['lastName'] as String,
-    dob: DateTime.parse(m['dob'] as String),
-    position: m['position'] as String,
-    salary: (m['salary'] as num).toDouble(),
-    branch: m['branch'] as String,
+    userId: m['userId'] as String? ?? '',
+    fullName: m['fullName'] as String? ?? '',
+    email: m['email'] as String? ?? '',
+    phone: m['phone'] as String? ?? '',
+    dob: DateTime.tryParse(m['dob'] as String? ?? '') ?? DateTime.now(),
+    role: m['role'] as String? ?? '',
+    position: m['position'] as String? ?? '',
+    salary: (m['salary'] as num?)?.toDouble() ?? 0.0,
+    branchName: m['branchName'] as String? ?? '',
+    branchId: m['branchId'] as String? ?? '',
+    joinedDate:
+        DateTime.tryParse(m['joinedDate'] as String? ?? '') ?? DateTime.now(),
+    status: m['status'] as String? ?? 'active',
     bankName: m['bankName'] as String? ?? '',
     bankBranch: m['bankBranch'] as String? ?? '',
     accountNo: m['accountNo'] as String? ?? '',
     accountHolder: m['accountHolder'] as String? ?? '',
-    joinedDate: DateTime.parse(m['joinedDate'] as String),
   );
+
+  // Backwards compatibility for UI code that used 'id'
+  String get id => userId;
+  set id(String val) => userId = val;
+  String get firstName => fullName.split(' ').first;
+  set firstName(String val) =>
+      fullName = '$val ${fullName.split(' ').skip(1).join(' ')}';
+  String get lastName => fullName.split(' ').length > 1
+      ? fullName.split(' ').skip(1).join(' ')
+      : '';
+  String get branch => branchName;
+  set branch(String val) => branchName = val;
 }
 
 class EmployeeService {
   static final List<Employee> _employees = [];
   // For Windows, localhost is often accessible but sometimes requires 127.0.0.1
-  // Android Emulator requires 10.0.2.2
   static const String _baseUrl = 'http://localhost:3000/api/employees';
 
   static Future<void> init() async {
-    // In HTTP version, init might just verify connection or fetch initial list
     await fetchEmployees();
     await _loadSalaryHistory();
   }
@@ -98,7 +126,7 @@ class EmployeeService {
         }
       }
     } catch (e) {
-      print('Error fetching employees: $e');
+      debugPrint('Error fetching employees: $e');
     }
   }
 
@@ -180,8 +208,9 @@ class EmployeeService {
         body: jsonEncode(e.toJson()),
       );
       if (response.statusCode == 201) {
-        // Refresh local list or just insert
-        _employees.insert(0, e);
+        // Since backend adds ID and Password, we should fetch list again or parse response
+        // Simplest is to just fetch fresh list to be safe
+        await fetchEmployees();
       }
     } catch (e) {
       debugPrint('Error adding employee: $e');
@@ -196,7 +225,7 @@ class EmployeeService {
         body: jsonEncode(updated.toJson()),
       );
       if (response.statusCode == 200) {
-        final idx = _employees.indexWhere((e) => e.id == id);
+        final idx = _employees.indexWhere((e) => e.userId == id); // Use userId
         if (idx != -1) _employees[idx] = updated;
       }
     } catch (e) {
@@ -208,7 +237,7 @@ class EmployeeService {
     try {
       final response = await http.delete(Uri.parse('$_baseUrl/$id'));
       if (response.statusCode == 200) {
-        _employees.removeWhere((e) => e.id == id);
+        _employees.removeWhere((e) => e.userId == id);
       }
     } catch (e) {
       debugPrint('Error deleting employee: $e');
@@ -216,31 +245,32 @@ class EmployeeService {
   }
 
   static Employee create({
-    required String firstName,
-    required String lastName,
+    required String fullName,
+    required String email,
+    required String phone,
     required DateTime dob,
-    required String position,
+    required String role,
+    // required String position,
     required double salary,
-    required String branch,
+    required String branchName,
     required DateTime joinedDate,
-    String? id,
+    String? userId,
     String bankName = '',
     String bankBranch = '',
     String accountNo = '',
     String accountHolder = '',
   }) {
-    final generatedId =
-        id ??
-        (DateTime.now().millisecondsSinceEpoch.toString() +
-            Random().nextInt(999).toString());
+    // ID generated in backend now
     return Employee(
-      id: generatedId,
-      firstName: firstName,
-      lastName: lastName,
+      userId: userId ?? '',
+      fullName: fullName,
+      email: email,
+      phone: phone,
       dob: dob,
-      position: position,
+      role: role,
+      position: role,
       salary: salary,
-      branch: branch,
+      branchName: branchName,
       bankName: bankName,
       bankBranch: bankBranch,
       accountNo: accountNo,
@@ -253,8 +283,9 @@ class EmployeeService {
   static Map<String, dynamic> prepareSalaryPayouts() {
     final items = _employees.map((e) {
       return {
-        'id': e.id,
-        'name': '${e.firstName} ${e.lastName}',
+        'id': e.userId,
+        // 'name': '${e.firstName} ${e.lastName}', // firstName/lastName getters handle full name split
+        'name': e.fullName,
         'bankName': e.bankName,
         'bankBranch': e.bankBranch,
         'accountNo': e.accountNo,
@@ -288,10 +319,14 @@ class EmployeeService {
     return true;
   }
 
-  // List of available positions
-  static const List<String> positions = [
-    'Field Visitor',
-    'Manager',
-    'IT Sector',
+  // List of available positions / roles
+  static const List<String> roles = ['Manager', 'Field Visitor', 'IT Sector'];
+
+  static const List<String> branches = [
+    'Kalmunai',
+    'Trincomalee',
+    'Chavakachcheri',
+    'Kondavil',
+    'Jaffna', // Fallback
   ];
 }

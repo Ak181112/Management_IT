@@ -4,7 +4,9 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 
-const employeeRoutes = require('./routes/employees');
+const employeesRouter = require('./routes/employees');
+const productsRouter = require('./routes/products');
+const membersRouter = require('./routes/members');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,7 +28,9 @@ mongoose.connect(process.env.MONGO_URI, {
     });
 
 // Routes
-app.use('/api/employees', employeeRoutes);
+app.use('/api/employees', employeesRouter);
+app.use('/api/products', productsRouter);
+app.use('/api/members', membersRouter);
 
 app.get('/', (req, res) => {
     res.send('Management IT Backend is Running');

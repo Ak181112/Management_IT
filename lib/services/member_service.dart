@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 
 class Transaction {
   final DateTime date;
@@ -90,25 +90,26 @@ class Member {
 }
 
 class MemberService {
-  static const String _storageKey = 'members';
   static final List<Member> _members = [];
+  static const String _baseUrl = 'http://localhost:3000/api/members';
 
   static Future<void> init() async {
-    final prefs = await SharedPreferences.getInstance();
-    final json = prefs.getString(_storageKey);
-    if (json != null) {
-      final data = jsonDecode(json) as List<dynamic>;
-      _members.clear();
-      _members.addAll(
-        data.map((m) => Member.fromJson(m as Map<String, dynamic>)),
-      );
-    }
+    await fetchMembers();
   }
 
-  static Future<void> _persist() async {
-    final prefs = await SharedPreferences.getInstance();
-    final json = jsonEncode(_members.map((m) => m.toJson()).toList());
-    await prefs.setString(_storageKey, json);
+  static Future<void> fetchMembers() async {
+    try {
+      final response = await http.get(Uri.parse(_baseUrl));
+      if (response.statusCode == 200) {
+        final List<dynamic> list = jsonDecode(response.body);
+        _members.clear();
+        for (final m in list) {
+          _members.add(Member.fromJson(m as Map<String, dynamic>));
+        }
+      }
+    } catch (e) {
+      print('Error fetching members: $e');
+    }
   }
 
   static List<Member> getMembers() => List.from(_members);
@@ -123,9 +124,8 @@ class MemberService {
     double totalBought = 0.0,
     double totalSold = 0.0,
   }) {
-    final memberId = id ?? 'M${DateTime.now().millisecondsSinceEpoch}';
     return Member(
-      id: memberId,
+      id: id ?? '', // ID handled by backend if empty
       name: name,
       contact: contact,
       email: email,
@@ -137,31 +137,55 @@ class MemberService {
     );
   }
 
-  static void addMember(Member member) {
-    _members.add(member);
-    _persist();
-  }
-
-  static void updateMember(String id, Member updated) {
-    final idx = _members.indexWhere((m) => m.id == id);
-    if (idx >= 0) {
-      _members[idx] = updated;
-      _persist();
+  static Future<void> addMember(Member member) async {
+    try {
+      final response = await http.post(
+        Uri.parse(_baseUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(member.toJson()),
+      );
+      if (response.statusCode == 201) {
+        await fetchMembers();
+      }
+    } catch (e) {
+      print('Error adding member: $e');
     }
   }
 
-  static void deleteMember(String id) {
-    _members.removeWhere((m) => m.id == id);
-    _persist();
+  static Future<void> updateMember(String id, Member updated) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$_baseUrl/$id'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(updated.toJson()),
+      );
+      if (response.statusCode == 200) {
+        final idx = _members.indexWhere((m) => m.id == id);
+        if (idx >= 0) _members[idx] = updated;
+      }
+    } catch (e) {
+      print('Error updating member: $e');
+    }
   }
 
-  static void addTransaction(
+  static Future<void> deleteMember(String id) async {
+    try {
+      final response = await http.delete(Uri.parse('$_baseUrl/$id'));
+      if (response.statusCode == 200) {
+        _members.removeWhere((m) => m.id == id);
+      }
+    } catch (e) {
+      print('Error deleting member: $e');
+    }
+  }
+
+  static Future<void> addTransaction(
     String memberId, {
     required double amount,
     required String type, // 'buy' or 'sell'
     required String description,
     String product = '',
-  }) {
+  }) async {
     final idx = _members.indexWhere((m) => m.id == memberId);
     if (idx >= 0) {
       final member = _members[idx];
@@ -187,8 +211,8 @@ class MemberService {
             : member.totalSold,
         transactions: [...member.transactions, transaction],
       );
-      _members[idx] = updatedMember;
-      _persist();
+
+      await updateMember(memberId, updatedMember);
     }
   }
 }

@@ -13,7 +13,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Management IT',
+      title: 'NF IT',
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF0F172A), // Dark Navy/Slate
         primaryColor: const Color(0xFF0EA5E9), // Sky Blue

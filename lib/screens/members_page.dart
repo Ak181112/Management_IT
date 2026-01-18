@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../services/member_service.dart';
 
@@ -44,7 +45,10 @@ class _MembersPageState extends State<MembersPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text(isEdit ? 'Edit Member' : 'Add Member'),
+          title: Text(
+            isEdit ? 'Edit Member' : 'Add Member',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -52,35 +56,43 @@ class _MembersPageState extends State<MembersPage> {
                 if (!isEdit)
                   TextField(
                     controller: idCtrl,
-                    decoration: const InputDecoration(
+                    style: GoogleFonts.outfit(),
+                    decoration: InputDecoration(
                       labelText: 'Member ID (e.g. M123456)',
-                      border: OutlineInputBorder(),
+                      labelStyle: GoogleFonts.outfit(),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: nameCtrl,
-                  decoration: const InputDecoration(
+                  style: GoogleFonts.outfit(),
+                  decoration: InputDecoration(
                     labelText: 'Full name',
-                    border: OutlineInputBorder(),
+                    labelStyle: GoogleFonts.outfit(),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: contactCtrl,
                   keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
+                  style: GoogleFonts.outfit(),
+                  decoration: InputDecoration(
                     labelText: 'Contact (Phone)',
-                    border: OutlineInputBorder(),
+                    labelStyle: GoogleFonts.outfit(),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: emailCtrl,
                   keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
+                  style: GoogleFonts.outfit(),
+                  decoration: InputDecoration(
                     labelText: 'Email address',
-                    border: OutlineInputBorder(),
+                    labelStyle: GoogleFonts.outfit(),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -110,6 +122,7 @@ class _MembersPageState extends State<MembersPage> {
                           dob != null
                               ? DateFormat('yyyy-MM-dd').format(dob!)
                               : 'Date of Birth',
+                          style: GoogleFonts.outfit(),
                         ),
                         const Icon(Icons.calendar_today, color: Colors.blue),
                       ],
@@ -143,6 +156,7 @@ class _MembersPageState extends State<MembersPage> {
                           joinedDate != null
                               ? DateFormat('yyyy-MM-dd').format(joinedDate!)
                               : 'Joined Date',
+                          style: GoogleFonts.outfit(),
                         ),
                         const Icon(Icons.calendar_today, color: Colors.blue),
                       ],
@@ -155,7 +169,7 @@ class _MembersPageState extends State<MembersPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
+              child: Text('Cancel', style: GoogleFonts.outfit()),
             ),
             TextButton(
               onPressed: () {
@@ -222,7 +236,10 @@ class _MembersPageState extends State<MembersPage> {
                 setState(() {});
                 Navigator.of(context).pop();
               },
-              child: const Text('Save'),
+              child: Text(
+                'Save',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         );
@@ -263,11 +280,11 @@ class _MembersPageState extends State<MembersPage> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Members', style: TextStyle(fontSize: 14)),
+                    Text('Members', style: GoogleFonts.outfit(fontSize: 14)),
                     const SizedBox(height: 6),
                     Text(
                       '$total',
-                      style: const TextStyle(
+                      style: GoogleFonts.outfit(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                       ),
@@ -291,28 +308,35 @@ class _MembersPageState extends State<MembersPage> {
     showDialog<void>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text(member.name),
+        title: Text(
+          member.name,
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+        ),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Contact: ${member.contact}'),
+              Text('Contact: ${member.contact}', style: GoogleFonts.outfit()),
               const SizedBox(height: 6),
               Text(
                 'Total Bought: LKR ${member.totalBought.toStringAsFixed(2)}',
+                style: GoogleFonts.outfit(),
               ),
               const SizedBox(height: 6),
-              Text('Total Sold: LKR ${member.totalSold.toStringAsFixed(2)}'),
+              Text(
+                'Total Sold: LKR ${member.totalSold.toStringAsFixed(2)}',
+                style: GoogleFonts.outfit(),
+              ),
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 'Transaction History:',
-                style: TextStyle(fontWeight: FontWeight.bold),
+                style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
               if (member.transactions.isEmpty)
-                const Text(
+                Text(
                   'No transactions',
-                  style: TextStyle(color: Colors.grey),
+                  style: GoogleFonts.outfit(color: Colors.grey),
                 )
               else
                 Column(
@@ -322,7 +346,7 @@ class _MembersPageState extends State<MembersPage> {
                       padding: const EdgeInsets.symmetric(vertical: 4.0),
                       child: Text(
                         '${t.type.toUpperCase()}: LKR ${t.amount.toStringAsFixed(2)} - ${t.description}\n${DateFormat('yyyy-MM-dd HH:mm').format(t.date)}',
-                        style: const TextStyle(fontSize: 12),
+                        style: GoogleFonts.outfit(fontSize: 12),
                       ),
                     );
                   }).toList(),
@@ -333,14 +357,14 @@ class _MembersPageState extends State<MembersPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(),
-            child: const Text('Close'),
+            child: Text('Close', style: GoogleFonts.outfit()),
           ),
           TextButton(
             onPressed: () {
               Navigator.of(c).pop();
               _openAddEditDialog(member: member);
             },
-            child: const Text('Edit'),
+            child: Text('Edit', style: GoogleFonts.outfit()),
           ),
         ],
       ),
@@ -437,7 +461,12 @@ class _MembersPageState extends State<MembersPage> {
               .toList();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Members')),
+      appBar: AppBar(
+        title: Text(
+          'Members',
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+        ),
+      ),
       body: Column(
         children: [
           _buildHeaderSummary(),
@@ -448,9 +477,11 @@ class _MembersPageState extends State<MembersPage> {
                 Expanded(
                   child: TextField(
                     controller: _searchCtrl,
-                    decoration: const InputDecoration(
+                    style: GoogleFonts.outfit(),
+                    decoration: InputDecoration(
                       labelText: 'Search by Member ID (e.g. M123456)',
-                      border: OutlineInputBorder(),
+                      labelStyle: GoogleFonts.outfit(),
+                      border: const OutlineInputBorder(),
                     ),
                     onChanged: (v) => setState(() => _filterId = v.trim()),
                   ),
@@ -481,12 +512,21 @@ class _MembersPageState extends State<MembersPage> {
                           backgroundColor: Colors.green,
                           child: Text(
                             m.name[0].toUpperCase(),
-                            style: const TextStyle(color: Colors.white),
+                            style: GoogleFonts.outfit(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
-                        title: Text(m.name),
+                        title: Text(
+                          m.name,
+                          style: GoogleFonts.outfit(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                         subtitle: Text(
                           'Bought: LKR ${m.totalBought.toStringAsFixed(2)} | Sold: LKR ${m.totalSold.toStringAsFixed(2)}\n${m.contact}',
+                          style: GoogleFonts.outfit(color: Colors.grey[700]),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),

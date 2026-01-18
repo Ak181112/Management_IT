@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../services/employee_service.dart';
 
 class SpreadsheetPage extends StatefulWidget {
@@ -10,11 +12,30 @@ class SpreadsheetPage extends StatefulWidget {
 
 class _SpreadsheetPageState extends State<SpreadsheetPage> {
   List<Employee> _employees = [];
-  final List<Employee> _newEmployees = [];
+  final Set<String> _newEmployeeIds = {};
   bool _isDirty = false;
-
-  // Controllers map to handle edits: { 'employeeId_field': controller }
   final Map<String, TextEditingController> _controllers = {};
+
+  // Column Configurations
+  final double _rowHeight = 60.0;
+  final double _headerHeight = 50.0;
+
+  // Defined widths for perfect alignment
+  final Map<int, double> _colWidths = {
+    0: 100, // ID
+    1: 150, // Role
+    2: 130, // Branch
+    3: 180, // Name
+    4: 200, // Email
+    5: 140, // Phone
+    6: 120, // Salary
+    7: 150, // Bank Name
+    8: 150, // Bank Branch
+    9: 150, // Account No
+    10: 180, // Holder Name
+    11: 120, // DOB
+    12: 120, // Joined
+  };
 
   @override
   void initState() {
@@ -25,17 +46,20 @@ class _SpreadsheetPageState extends State<SpreadsheetPage> {
   void _loadData() {
     setState(() {
       _employees = List.from(EmployeeService.getEmployees());
+      _newEmployeeIds.clear();
       _isDirty = false;
-      _newEmployees.clear();
-      _controllers.clear();
+      _disposeControllers();
     });
+  }
+
+  void _disposeControllers() {
+    for (var c in _controllers.values) c.dispose();
+    _controllers.clear();
   }
 
   @override
   void dispose() {
-    for (var c in _controllers.values) {
-      c.dispose();
-    }
+    _disposeControllers();
     super.dispose();
   }
 
@@ -52,149 +76,470 @@ class _SpreadsheetPageState extends State<SpreadsheetPage> {
 
   void _addNewRow() {
     setState(() {
-      _newEmployees.add(
-        EmployeeService.create(
-          firstName: '',
-          lastName: '',
-          dob: DateTime(2000),
-          position: 'IT Sector', // Default
-          salary: 0,
-          branch: '',
-          joinedDate: DateTime.now(),
-        ),
+      final tempId = 'NEW_${DateTime.now().millisecondsSinceEpoch}';
+      final newEmp = EmployeeService.create(
+        userId: tempId,
+        fullName: '',
+        email: '',
+        phone: '',
+        dob: DateTime(2000),
+        role: EmployeeService.roles.first,
+        salary: 0,
+        branchName: EmployeeService.branches.first,
+        joinedDate: DateTime.now(),
       );
-      _markDirty();
+      _employees.add(newEmp);
+      _newEmployeeIds.add(tempId);
+      _isDirty = true;
     });
   }
 
-  Future<void> _saveAll() async {
-    // 1. Update existing employees from controllers
-    for (var emp in _employees) {
-      final id = emp.id;
-      final fnameCtrl = _controllers['${id}_fname'];
-      final lnameCtrl = _controllers['${id}_lname'];
-      final posCtrl = _controllers['${id}_pos'];
-      final salCtrl = _controllers['${id}_sal'];
-      final branchCtrl = _controllers['${id}_branch'];
-
-      if (fnameCtrl != null) emp.firstName = fnameCtrl.text;
-      if (lnameCtrl != null) emp.lastName = lnameCtrl.text;
-      if (posCtrl != null) emp.position = posCtrl.text; // Note: validation?
-      if (salCtrl != null) {
-        emp.salary = double.tryParse(salCtrl.text) ?? emp.salary;
-      }
-      if (branchCtrl != null) emp.branch = branchCtrl.text;
-
-      await EmployeeService.updateEmployee(id, emp);
-    }
-
-    // 2. Add new employees
-    for (var emp in _newEmployees) {
-      final id = emp.id;
-      final fnameCtrl = _controllers['${id}_fname'];
-      final lnameCtrl = _controllers['${id}_lname'];
-      final posCtrl = _controllers['${id}_pos'];
-      final salCtrl = _controllers['${id}_sal'];
-      final branchCtrl = _controllers['${id}_branch'];
-
-      // if user didn't touch it, it uses default empty strings/0 from create()
-      if (fnameCtrl != null) emp.firstName = fnameCtrl.text;
-      if (lnameCtrl != null) emp.lastName = lnameCtrl.text;
-      if (posCtrl != null) emp.position = posCtrl.text;
-      if (salCtrl != null) {
-        emp.salary = double.tryParse(salCtrl.text) ?? 0.0;
-      }
-      if (branchCtrl != null) emp.branch = branchCtrl.text;
-
-      // Basic validation: ensure at least a name
-      if (emp.firstName.isNotEmpty) {
-        await EmployeeService.addEmployee(emp);
-      }
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Changes saved successfully!')),
+  Future<void> _onSavePressed() async {
+    final curContext = context;
+    final confirm = await showDialog<bool>(
+      context: curContext,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirm Changes'),
+        content: const Text('Save all changes to the database?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
     );
 
-    // Refresh data
-    await EmployeeService.fetchEmployees();
-    _loadData(); // resync
+    if (confirm == true && mounted) {
+      await _saveAll();
+    }
   }
 
-  Widget _buildCell(Employee e, String field, String val) {
-    final key = '${e.id}_$field';
+  Future<void> _saveAll() async {
+    for (var emp in _employees) {
+      final id = emp.userId;
+      final nameCtrl = _controllers['${id}_name'];
+      final emailCtrl = _controllers['${id}_email'];
+      final phoneCtrl = _controllers['${id}_phone'];
+      final salCtrl = _controllers['${id}_sal'];
+      final bankNameCtrl = _controllers['${id}_bnkName'];
+      final bankBranchCtrl = _controllers['${id}_bnkBranch'];
+      final accCtrl = _controllers['${id}_acc'];
+      final holderCtrl = _controllers['${id}_holder'];
+
+      if (nameCtrl != null) emp.fullName = nameCtrl.text;
+      if (emailCtrl != null) emp.email = emailCtrl.text;
+      if (phoneCtrl != null) emp.phone = phoneCtrl.text;
+      if (salCtrl != null)
+        emp.salary = double.tryParse(salCtrl.text) ?? emp.salary;
+      if (bankNameCtrl != null) emp.bankName = bankNameCtrl.text;
+      if (bankBranchCtrl != null) emp.bankBranch = bankBranchCtrl.text;
+      if (accCtrl != null) emp.accountNo = accCtrl.text;
+      if (holderCtrl != null) emp.accountHolder = holderCtrl.text;
+
+      if (_newEmployeeIds.contains(id)) {
+        final toCreate = EmployeeService.create(
+          fullName: emp.fullName,
+          email: emp.email,
+          phone: emp.phone,
+          dob: emp.dob,
+          role: emp.role,
+          salary: emp.salary,
+          branchName: emp.branchName,
+          joinedDate: emp.joinedDate,
+          bankName: emp.bankName,
+          bankBranch: emp.bankBranch,
+          accountNo: emp.accountNo,
+          accountHolder: emp.accountHolder,
+        );
+        await EmployeeService.addEmployee(toCreate);
+      } else {
+        await EmployeeService.updateEmployee(id, emp);
+      }
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Saved!')));
+      await EmployeeService.fetchEmployees();
+      _loadData();
+    }
+  }
+
+  // --- UI COMPONENTS ---
+
+  Widget _buildHeaderCell(int index, String text) {
+    return Container(
+      width: _colWidths[index],
+      height: _headerHeight,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A), // Slate 900
+        border: Border(
+          right: BorderSide(color: Colors.white.withOpacity(0.1), width: 1),
+        ),
+      ),
+      child: Text(
+        text.toUpperCase(),
+        style: GoogleFonts.outfit(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: 13,
+          letterSpacing: 1.0,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTypedCell(int index, Widget content, {bool isOdd = false}) {
+    return Container(
+      width: _colWidths[index],
+      height: _rowHeight,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: isOdd ? Colors.grey[50] : Colors.white,
+        border: Border(
+          right: BorderSide(color: Colors.grey.withOpacity(0.2)),
+          bottom: BorderSide(color: Colors.grey.withOpacity(0.2)),
+        ),
+      ),
+      child: content,
+    );
+  }
+
+  Widget _buildTextField(
+    Employee e,
+    String field,
+    String val, {
+    bool isNumber = false,
+  }) {
+    final key = '${e.userId}_$field';
     final ctrl = _getController(key, val);
     return TextFormField(
       controller: ctrl,
       onChanged: (_) => _markDirty(),
+      keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+      style: GoogleFonts.outfit(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: Colors.black,
+      ),
       decoration: const InputDecoration(
         isDense: true,
-        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
         border: InputBorder.none,
       ),
-      style: const TextStyle(fontSize: 13),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final allRows = [..._newEmployees, ..._employees];
+    final totalWidth = _colWidths.values.reduce((a, b) => a + b);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Employee Spreadsheet'),
+        title: Text(
+          'Employee Master Sheet',
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFF0F172A),
         actions: [
-          TextButton.icon(
-            onPressed: _addNewRow,
-            icon: const Icon(Icons.add),
-            label: const Text('Add Row'),
-          ),
-          const SizedBox(width: 8),
-          ElevatedButton.icon(
-            onPressed: _isDirty ? _saveAll : null,
-            icon: const Icon(Icons.save),
-            label: const Text('Save All'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _isDirty ? const Color(0xFF0EA5E9) : Colors.grey,
+          if (_isDirty)
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 8.0,
+                vertical: 8.0,
+              ),
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.save_alt, size: 18),
+                label: Text(
+                  "Save Changes",
+                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981), // Emerald
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: _onSavePressed,
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
         ],
       ),
-      body: SingleChildScrollView(
-        scrollDirection: Axis.vertical,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            columnSpacing: 20,
-            headingRowColor: MaterialStateProperty.all(const Color(0xFF1E293B)),
-            columns: const [
-              DataColumn(label: Text('ID')),
-              DataColumn(label: Text('First Name')),
-              DataColumn(label: Text('Last Name')),
-              DataColumn(label: Text('Position')),
-              DataColumn(label: Text('Branch')),
-              DataColumn(label: Text('Salary (LKR)')),
-            ],
-            rows: allRows.map((e) {
-              return DataRow(
-                cells: [
-                  DataCell(
-                    Text(
-                      e.id,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+      body: Column(
+        children: [
+          // STICKY HEADER + SCROLLABLE BODY
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(
+                width: totalWidth,
+                child: Column(
+                  children: [
+                    // 1. FIXED HEADER ROW
+                    Row(
+                      children: [
+                        _buildHeaderCell(0, 'ID / Status'),
+                        _buildHeaderCell(1, 'Role'),
+                        _buildHeaderCell(2, 'Branch'),
+                        _buildHeaderCell(3, 'Full Name'),
+                        _buildHeaderCell(4, 'Email'),
+                        _buildHeaderCell(5, 'Phone'),
+                        _buildHeaderCell(6, 'Salary (LKR)'),
+                        _buildHeaderCell(7, 'Bank Name'),
+                        _buildHeaderCell(8, 'Bank Branch'),
+                        _buildHeaderCell(9, 'Account No'),
+                        _buildHeaderCell(10, 'Holder Name'),
+                        _buildHeaderCell(11, 'DOB'),
+                        _buildHeaderCell(12, 'Joined Date'),
+                      ],
                     ),
-                  ),
-                  DataCell(_buildCell(e, 'fname', e.firstName)),
-                  DataCell(_buildCell(e, 'lname', e.lastName)),
-                  DataCell(_buildCell(e, 'pos', e.position)),
-                  DataCell(_buildCell(e, 'branch', e.branch)),
-                  DataCell(_buildCell(e, 'sal', e.salary.toString())),
-                ],
-              );
-            }).toList(),
+                    // 2. SCROLLABLE ROWS
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: _employees.length,
+                        itemBuilder: (context, index) {
+                          final e = _employees[index];
+                          final isNew = _newEmployeeIds.contains(e.userId);
+                          final isOdd = index % 2 != 0;
+
+                          return Row(
+                            children: [
+                              _buildTypedCell(
+                                0,
+                                Center(
+                                  child: Text(
+                                    isNew ? 'NEW' : e.userId,
+                                    style: GoogleFonts.outfit(
+                                      fontWeight: FontWeight.w900,
+                                      color: isNew
+                                          ? Colors.blue.shade900
+                                          : Colors.black,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                                isOdd: isOdd,
+                              ),
+                              _buildTypedCell(
+                                1,
+                                DropdownButton<String>(
+                                  value: EmployeeService.roles.contains(e.role)
+                                      ? e.role
+                                      : null,
+                                  items: EmployeeService.roles
+                                      .map(
+                                        (r) => DropdownMenuItem(
+                                          value: r,
+                                          child: Text(
+                                            r,
+                                            style: GoogleFonts.outfit(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.black,
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (val) {
+                                    if (val != null)
+                                      setState(() {
+                                        e.role = val;
+                                        e.position = val;
+                                        _isDirty = true;
+                                      });
+                                  },
+                                  underline: Container(),
+                                  isExpanded: true,
+                                ),
+                                isOdd: isOdd,
+                              ),
+                              _buildTypedCell(
+                                2,
+                                DropdownButton<String>(
+                                  value:
+                                      EmployeeService.branches.contains(
+                                        e.branchName,
+                                      )
+                                      ? e.branchName
+                                      : null,
+                                  items: EmployeeService.branches
+                                      .map(
+                                        (b) => DropdownMenuItem(
+                                          value: b,
+                                          child: Text(
+                                            b,
+                                            style: GoogleFonts.outfit(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.black,
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (val) {
+                                    if (val != null)
+                                      setState(() {
+                                        e.branchName = val;
+                                        _isDirty = true;
+                                      });
+                                  },
+                                  underline: Container(),
+                                  isExpanded: true,
+                                ),
+                                isOdd: isOdd,
+                              ),
+                              _buildTypedCell(
+                                3,
+                                _buildTextField(e, 'name', e.fullName),
+                                isOdd: isOdd,
+                              ),
+                              _buildTypedCell(
+                                4,
+                                _buildTextField(e, 'email', e.email),
+                                isOdd: isOdd,
+                              ),
+                              _buildTypedCell(
+                                5,
+                                _buildTextField(e, 'phone', e.phone),
+                                isOdd: isOdd,
+                              ),
+                              _buildTypedCell(
+                                6,
+                                _buildTextField(
+                                  e,
+                                  'sal',
+                                  e.salary.toString(),
+                                  isNumber: true,
+                                ),
+                                isOdd: isOdd,
+                              ),
+                              _buildTypedCell(
+                                7,
+                                _buildTextField(e, 'bnkName', e.bankName),
+                                isOdd: isOdd,
+                              ),
+                              _buildTypedCell(
+                                8,
+                                _buildTextField(e, 'bnkBranch', e.bankBranch),
+                                isOdd: isOdd,
+                              ),
+                              _buildTypedCell(
+                                9,
+                                _buildTextField(e, 'acc', e.accountNo),
+                                isOdd: isOdd,
+                              ),
+                              _buildTypedCell(
+                                10,
+                                _buildTextField(e, 'holder', e.accountHolder),
+                                isOdd: isOdd,
+                              ),
+                              _buildTypedCell(
+                                11,
+                                InkWell(
+                                  onTap: () async {
+                                    final d = await showDatePicker(
+                                      context: context,
+                                      initialDate: e.dob,
+                                      firstDate: DateTime(1900),
+                                      lastDate: DateTime.now(),
+                                    );
+                                    if (d != null)
+                                      setState(() {
+                                        e.dob = d;
+                                        _isDirty = true;
+                                      });
+                                  },
+                                  child: Text(
+                                    DateFormat('yyyy-MM-dd').format(e.dob),
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.black,
+                                    ),
+                                  ),
+                                ),
+                                isOdd: isOdd,
+                              ),
+                              _buildTypedCell(
+                                12,
+                                InkWell(
+                                  onTap: () async {
+                                    final d = await showDatePicker(
+                                      context: context,
+                                      initialDate: e.joinedDate,
+                                      firstDate: DateTime(2000),
+                                      lastDate: DateTime.now(),
+                                    );
+                                    if (d != null)
+                                      setState(() {
+                                        e.joinedDate = d;
+                                        _isDirty = true;
+                                      });
+                                  },
+                                  child: Text(
+                                    DateFormat(
+                                      'yyyy-MM-dd',
+                                    ).format(e.joinedDate),
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.black,
+                                    ),
+                                  ),
+                                ),
+                                isOdd: isOdd,
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
-        ),
+          // FOOTER: ADD ROW
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black12,
+                  blurRadius: 10,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            child: ElevatedButton.icon(
+              onPressed: _addNewRow,
+              icon: const Icon(Icons.add_circle, color: Colors.white),
+              label: Text(
+                'ADD NEW ROW',
+                style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0F172A),
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -144,7 +144,7 @@ class _HomePageState extends State<HomePage> {
     final employeeTotal = EmployeeService.getEmployees().length;
     final employeeSeries = _monthlyNewEmployees();
     final positionCounts = <String, int>{};
-    for (final pos in EmployeeService.positions) {
+    for (final pos in EmployeeService.roles) {
       positionCounts[pos] = EmployeeService.getEmployees()
           .where((e) => e.position == pos)
           .length;
