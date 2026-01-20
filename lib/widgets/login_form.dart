@@ -236,7 +236,7 @@ class _LoginFormState extends State<LoginForm> {
                             }
 
                             if (newPass == confirmPass) {
-                              AuthService.changePassword(newPass);
+                              AuthService.resetPassword(newPass);
                               AuthService.clearOtp();
 
                               Navigator.of(context).pop();

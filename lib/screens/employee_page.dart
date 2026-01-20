@@ -7,21 +7,11 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:excel/excel.dart' hide Border;
 import '../services/employee_service.dart';
 import '../services/audit_service.dart';
-import 'spreadsheet_page.dart';
-
-// Upper-case formatter
-class _UpperCaseTextFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    final upper = newValue.text.toUpperCase();
-    return newValue.copyWith(text: upper, selection: newValue.selection);
-  }
-}
+import 'bulk_entry_dialog.dart';
 
 class EmployeePage extends StatefulWidget {
   const EmployeePage({super.key});
@@ -33,6 +23,8 @@ class EmployeePage extends StatefulWidget {
 class _EmployeePageState extends State<EmployeePage> {
   final TextEditingController _searchCtrl = TextEditingController();
   String? _filterId;
+  String? _filterPosition;
+  String? _filterBranch;
 
   @override
   void initState() {
@@ -46,6 +38,133 @@ class _EmployeePageState extends State<EmployeePage> {
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _importExcel() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['xlsx', 'xls'],
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      List<int>? fileBytes = result.files.first.bytes;
+      final filePath = result.files.first.path;
+
+      if (fileBytes == null && filePath != null) {
+        fileBytes = await File(filePath).readAsBytes();
+      }
+
+      if (fileBytes == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read file data.')),
+        );
+        return;
+      }
+
+      final excel = Excel.decodeBytes(fileBytes);
+      if (excel.tables.isEmpty) return;
+
+      // Show loading
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (c) => const Center(child: CircularProgressIndicator()),
+      );
+
+      final rowsToImport = <Map<String, dynamic>>[];
+      final tableName = excel.tables.keys.first;
+      final table = excel.tables[tableName]!;
+
+      // Get headers from first row
+      final headers = table.rows.first.map((c) => _getCellValue(c)).toList();
+
+      for (int i = 1; i < table.rows.length; i++) {
+        final row = table.rows[i];
+        if (row.every((c) => c == null || c.value == null)) continue;
+
+        final Map<String, dynamic> rowData = {};
+        for (int j = 0; j < headers.length; j++) {
+          if (j < row.length) {
+            rowData[headers[j]] = _getCellValue(row[j]);
+          }
+        }
+        rowsToImport.add(rowData);
+      }
+
+      final stats = await EmployeeService.importITSectorExcel(rowsToImport);
+
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading
+
+      final int inserted = stats['data']['insertedCount'] ?? 0;
+      final int updated = stats['data']['updatedCount'] ?? 0;
+      final int skipped = stats['data']['skippedCount'] ?? 0;
+      final List<dynamic> skippedDetails =
+          stats['data']['skippedDetails'] ?? [];
+
+      if (!mounted) return;
+
+      if (skipped > 0 && skippedDetails.isNotEmpty) {
+        showDialog(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Import Partial/Skipped'),
+            content: SizedBox(
+              height: 200,
+              width: double.maxFinite,
+              child: ListView.builder(
+                itemCount: skippedDetails.length,
+                itemBuilder: (ctx, i) {
+                  final item = skippedDetails[i];
+                  return ListTile(
+                    leading: const Icon(Icons.warning, color: Colors.orange),
+                    title: Text('Row ${item['rowIndex']}'),
+                    subtitle: Text(item['reason'] ?? 'Unknown error'),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(c);
+                  setState(() {});
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Import complete: $inserted inserted, $updated updated, $skipped skipped.',
+            ),
+            backgroundColor: (inserted > 0 || updated > 0)
+                ? Colors.green
+                : Colors.orange,
+          ),
+        );
+      }
+
+      setState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      if (Navigator.canPop(context)) Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  String _getCellValue(Data? cell) {
+    if (cell == null) return '';
+    return cell.value?.toString() ?? '';
   }
 
   Widget _buildPositionSummary() {
@@ -90,6 +209,16 @@ class _EmployeePageState extends State<EmployeePage> {
         ),
       ),
     );
+  }
+
+  String _getReadableBranch(String code) {
+    if (code.toLowerCase().contains('jk')) return 'Jaffna';
+    if (code.toLowerCase().contains('km')) return 'Kalmunai';
+    if (code.toLowerCase().contains('tr')) return 'Trincomalee';
+    if (code.toLowerCase().contains('ch')) return 'Chavakachcheri';
+    if (code.toLowerCase().contains('kd')) return 'Kondavil';
+    // If it's already a full name or unknown code
+    return code;
   }
 
   void _openAddEditDialog({Employee? employee}) async {
@@ -992,94 +1121,552 @@ class _EmployeePageState extends State<EmployeePage> {
 
   @override
   Widget build(BuildContext context) {
-    final employees = EmployeeService.getEmployees();
-    final displayed = (_filterId == null || _filterId!.isEmpty)
-        ? employees
-        : employees.where((e) => e.userId.contains(_filterId!)).toList();
+    var employees = EmployeeService.getEmployees();
+
+    // 1. Filter by Search Text (Name or ID)
+    if (_filterId != null && _filterId!.isNotEmpty) {
+      final q = _filterId!.toLowerCase();
+      employees = employees.where((e) {
+        return e.fullName.toLowerCase().contains(q) ||
+            e.userId.toLowerCase().contains(q);
+      }).toList();
+    }
+
+    // 2. Filter by Position
+    if (_filterPosition != null && _filterPosition!.isNotEmpty) {
+      employees = employees.where((e) => e.role == _filterPosition).toList();
+    }
+
+    // 3. Filter by Branch
+    if (_filterBranch != null && _filterBranch!.isNotEmpty) {
+      employees = employees
+          .where((e) => e.branchName == _filterBranch)
+          .toList();
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Staff Management'),
+        title: Text(
+          'Employee Master Sheet',
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFF1F2937),
         actions: [
           IconButton(
-            tooltip: 'Spreadsheet View',
-            icon: const Icon(Icons.table_chart),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (c) => const SpreadsheetPage()),
-              );
-            },
+            icon: const Icon(Icons.payments),
+            tooltip: 'Pay Salaries',
+            onPressed: _onPaySalaries,
           ),
           IconButton(
-            tooltip: 'Pay Salaries',
-            icon: const Icon(Icons.payments),
-            onPressed: _onPaySalaries,
+            icon: const Icon(Icons.upload_file, color: Colors.blueAccent),
+            tooltip: 'Import IT Sector (Excel)',
+            onPressed: _importExcel,
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () async {
+              await EmployeeService.fetchEmployees();
+              setState(() {});
+            },
           ),
         ],
       ),
       body: Column(
         children: [
           _buildPositionSummary(),
+          // Search & Filter Row
           Padding(
-            padding: const EdgeInsets.all(12.0),
+            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8),
             child: Row(
               children: [
+                // Search Field
                 Expanded(
+                  flex: 2,
                   child: TextField(
                     controller: _searchCtrl,
-                    inputFormatters: [_UpperCaseTextFormatter()],
+                    style: GoogleFonts.outfit(),
+                    decoration: InputDecoration(
+                      labelText: 'Search by ID or Name',
+                      labelStyle: GoogleFonts.outfit(),
+                      prefixIcon: const Icon(Icons.search),
+                      border: const OutlineInputBorder(),
+                      contentPadding: const EdgeInsets.symmetric(
+                        vertical: 0,
+                        horizontal: 10,
+                      ),
+                    ),
+                    onChanged: (v) => setState(() => _filterId = v.trim()),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Filter by Position
+                Expanded(
+                  child: InputDecorator(
                     decoration: const InputDecoration(
-                      labelText: 'Search by ID (e.g. MGR-KM-)',
+                      labelText: 'Position',
                       border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        vertical: 0,
+                        horizontal: 10,
+                      ),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _filterPosition,
+                        isExpanded: true,
+                        items: [
+                          const DropdownMenuItem(
+                            value: null,
+                            child: Text('All Positions'),
+                          ),
+                          ...EmployeeService.roles.map(
+                            (r) => DropdownMenuItem(value: r, child: Text(r)),
+                          ),
+                        ],
+                        onChanged: (val) =>
+                            setState(() => _filterPosition = val),
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: () {
-                    setState(() {
-                      _filterId = _searchCtrl.text.trim().toUpperCase();
-                    });
-                  },
+                // Filter by Branch
+                Expanded(
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'Branch',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        vertical: 0,
+                        horizontal: 10,
+                      ),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _filterBranch,
+                        isExpanded: true,
+                        items: [
+                          const DropdownMenuItem(
+                            value: null,
+                            child: Text('All Branches'),
+                          ),
+                          ...EmployeeService.branches.map(
+                            (b) => DropdownMenuItem(value: b, child: Text(b)),
+                          ),
+                        ],
+                        onChanged: (val) => setState(() => _filterBranch = val),
+                      ),
+                    ),
+                  ),
                 ),
+                const SizedBox(width: 8),
+                // Clear Button
                 IconButton(
-                  icon: const Icon(Icons.clear),
                   onPressed: () {
                     _searchCtrl.clear();
                     setState(() {
                       _filterId = null;
+                      _filterPosition = null;
+                      _filterBranch = null;
                     });
                   },
+                  icon: const Icon(Icons.clear, color: Colors.grey),
+                  tooltip: 'Clear Filters',
                 ),
               ],
             ),
           ),
           Expanded(
-            child: displayed.isEmpty
-                ? const Center(child: Text('No employees found'))
-                : ListView.builder(
-                    itemCount: displayed.length,
-                    itemBuilder: (ctx, i) {
-                      final emp = displayed[i];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.vertical,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  columns: [
+                    DataColumn(
+                      label: Text(
+                        'ID / STATUS',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
                         ),
-                        child: ListTile(
-                          leading: CircleAvatar(
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'ROLE',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'BRANCH',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'FULL NAME',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'NIC',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'EMAIL',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'PHONE',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'CIVIL STATUS',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'POSTAL ADDR',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'PERM ADDR',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'EDUCATION',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'SALARY\n(LKR)',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'BANK NAME',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'BANK BRANCH',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'ACCOUNT NO',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'HOLDER',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'ACTIONS',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                  headingRowColor: WidgetStateProperty.all(
+                    const Color(0xFF111827),
+                  ),
+                  dataRowMinHeight: 60,
+                  dataRowMaxHeight: 60,
+                  rows: employees.map((e) {
+                    return DataRow(
+                      cells: [
+                        // ID / Status (0)
+                        DataCell(
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                e.userId,
+                                style: GoogleFonts.outfit(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: e.status == 'active'
+                                      ? Colors.green.withValues(alpha: 0.1)
+                                      : Colors.red.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  e.status.toUpperCase(),
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.bold,
+                                    color: e.status == 'active'
+                                        ? Colors.green
+                                        : Colors.red,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Role (1)
+                        DataCell(
+                          Text(e.role, style: GoogleFonts.outfit(fontSize: 12)),
+                        ),
+                        // Branch (2)
+                        DataCell(
+                          Text(
+                            _getReadableBranch(e.branchName),
+                            style: GoogleFonts.outfit(fontSize: 12),
+                          ),
+                        ),
+                        // Name (3)
+                        DataCell(
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            color: const Color(0xFF1F2937),
                             child: Text(
-                              emp.fullName.isNotEmpty ? emp.fullName[0] : '?',
+                              e.fullName,
+                              style: GoogleFonts.outfit(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
-                          title: Text(emp.fullName),
-                          subtitle: Text(
-                            '${emp.userId}\n${emp.role} @ ${emp.branchName}',
+                        ),
+                        // NIC (4)
+                        DataCell(
+                          Text(e.nic, style: GoogleFonts.outfit(fontSize: 11)),
+                        ),
+                        // Email (5)
+                        DataCell(
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            color: const Color(0xFF1F2937),
+                            child: Text(
+                              e.email,
+                              style: GoogleFonts.outfit(
+                                fontSize: 11,
+                                color: Colors.blue[200],
+                              ),
+                            ),
                           ),
-                          isThreeLine: true,
-                          onTap: () => _showEmployeeDetails(emp),
-                          trailing: Row(
+                        ),
+                        // Phone (6)
+                        DataCell(
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            color: const Color(0xFF1F2937),
+                            child: Text(
+                              e.phone,
+                              style: GoogleFonts.outfit(color: Colors.white),
+                            ),
+                          ),
+                        ),
+                        // Civil Status (7)
+                        DataCell(
+                          Text(
+                            e.civilStatus,
+                            style: GoogleFonts.outfit(fontSize: 11),
+                          ),
+                        ),
+                        // Postal Addr (8)
+                        DataCell(
+                          SizedBox(
+                            width: 100,
+                            child: Text(
+                              e.postalAddress,
+                              style: GoogleFonts.outfit(fontSize: 10),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 2,
+                            ),
+                          ),
+                        ),
+                        // Perm Addr (9)
+                        DataCell(
+                          SizedBox(
+                            width: 100,
+                            child: Text(
+                              e.permanentAddress,
+                              style: GoogleFonts.outfit(fontSize: 10),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 2,
+                            ),
+                          ),
+                        ),
+                        // Education (10)
+                        DataCell(
+                          SizedBox(
+                            width: 100,
+                            child: Text(
+                              e.education,
+                              style: GoogleFonts.outfit(fontSize: 10),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                        // Salary (11)
+                        DataCell(
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            color: const Color(0xFF1F2937),
+                            child: Text(
+                              e.salary.toString(),
+                              style: GoogleFonts.outfit(color: Colors.grey),
+                            ),
+                          ),
+                        ),
+                        // Bank info (12, 13, 14, 15)
+                        DataCell(
+                          Container(
+                            width: 80,
+                            padding: const EdgeInsets.all(4),
+                            color: const Color(0xFF1F2937),
+                            child: Text(
+                              e.bankName,
+                              style: GoogleFonts.outfit(
+                                fontSize: 10,
+                                color: Colors.white,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Container(
+                            width: 80,
+                            padding: const EdgeInsets.all(4),
+                            color: const Color(0xFF1F2937),
+                            child: Text(
+                              e.bankBranch,
+                              style: GoogleFonts.outfit(
+                                fontSize: 10,
+                                color: Colors.white,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Container(
+                            width: 80,
+                            padding: const EdgeInsets.all(4),
+                            color: const Color(0xFF1F2937),
+                            child: Text(
+                              e.accountNo,
+                              style: GoogleFonts.outfit(
+                                fontSize: 10,
+                                color: Colors.white,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Container(
+                            width: 80,
+                            padding: const EdgeInsets.all(4),
+                            color: const Color(0xFF1F2937),
+                            child: Text(
+                              e.accountHolder,
+                              style: GoogleFonts.outfit(
+                                fontSize: 10,
+                                color: Colors.white,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                        // Actions (16)
+                        DataCell(
+                          Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
@@ -1087,21 +1674,15 @@ class _EmployeePageState extends State<EmployeePage> {
                                   Icons.edit,
                                   color: Colors.blue,
                                 ),
-                                onPressed: () {
-                                  debugPrint(
-                                    'Edit button pressed for ${emp.fullName}',
-                                  );
-                                  try {
-                                    _openAddEditDialog(employee: emp);
-                                  } catch (e, stack) {
-                                    debugPrint(
-                                      'Error opening edit dialog: $e\n$stack',
-                                    );
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Error: $e')),
-                                    );
-                                  }
-                                },
+                                onPressed: () =>
+                                    _openAddEditDialog(employee: e),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.print,
+                                  color: Colors.grey,
+                                ),
+                                onPressed: () => _showEmployeeDetails(e),
                               ),
                               IconButton(
                                 icon: const Icon(
@@ -1109,26 +1690,27 @@ class _EmployeePageState extends State<EmployeePage> {
                                   color: Colors.red,
                                 ),
                                 onPressed: () async {
+                                  // Capture ScaffoldMessenger before any async operations
+                                  final messenger = ScaffoldMessenger.of(
+                                    context,
+                                  );
+
                                   final confirm = await showDialog<bool>(
                                     context: context,
-                                    builder: (ctx) => AlertDialog(
-                                      title: const Text('Delete Employee?'),
+                                    builder: (c) => AlertDialog(
+                                      title: const Text('Delete Employee'),
                                       content: Text(
-                                        'Are you sure you want to delete ${emp.fullName}?',
+                                        'Are you sure you want to delete ${e.fullName}?',
                                       ),
                                       actions: [
                                         TextButton(
                                           onPressed: () =>
-                                              Navigator.of(ctx).pop(false),
+                                              Navigator.of(c).pop(false),
                                           child: const Text('Cancel'),
                                         ),
-                                        ElevatedButton(
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.red,
-                                            foregroundColor: Colors.white,
-                                          ),
+                                        TextButton(
                                           onPressed: () =>
-                                              Navigator.of(ctx).pop(true),
+                                              Navigator.of(c).pop(true),
                                           child: const Text('Delete'),
                                         ),
                                       ],
@@ -1136,19 +1718,83 @@ class _EmployeePageState extends State<EmployeePage> {
                                   );
 
                                   if (confirm == true) {
-                                    await EmployeeService.deleteEmployee(
-                                      emp.userId,
-                                    );
-                                    if (context.mounted) setState(() {});
+                                    try {
+                                      await EmployeeService.deleteEmployee(
+                                        e.id,
+                                      );
+                                      AuditService.logAction(
+                                        'User Deleted',
+                                        'Deleted user: ${e.fullName}',
+                                        targetUser: e.fullName,
+                                      );
+                                      setState(() {});
+
+                                      if (mounted) {
+                                        messenger.showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              '${e.fullName} deleted successfully',
+                                            ),
+                                            backgroundColor: Colors.green,
+                                          ),
+                                        );
+                                      }
+                                    } catch (error) {
+                                      if (mounted) {
+                                        messenger.showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Delete failed: $error',
+                                            ),
+                                            backgroundColor: Colors.red,
+                                          ),
+                                        );
+                                      }
+                                    }
                                   }
                                 },
                               ),
                             ],
                           ),
                         ),
-                      );
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ),
+          // Add Button Bar
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            color: const Color(0xFF111827),
+            child: ElevatedButton.icon(
+              onPressed: () {
+                // _openAddEditDialog();
+                // User requested bulk entry UI instead
+                showDialog(
+                  context: context,
+                  builder: (context) => BulkEntryDialog(
+                    onSaveComplete: () {
+                      setState(() {});
                     },
                   ),
+                );
+              },
+              icon: const Icon(Icons.add_circle, color: Colors.white),
+              label: Text(
+                'ADD NEW ROW',
+                style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1F2937),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+            ),
           ),
         ],
       ),

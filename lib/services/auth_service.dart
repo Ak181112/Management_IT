@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 import '../config/api_config.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthService {
   // Static user data to hold session info
@@ -17,17 +18,25 @@ class AuthService {
   static String email = '';
   static String mobile = '';
 
-  // Fallback for mock login if API fails or for testing
-  static const String _mockUser = 'KA0001';
-  static const String _mockPass = '1234';
-
-  static Future<bool> login(String user, String pass) async {
+  static Future<bool> login(
+    String user,
+    String pass, {
+    String role = 'manager',
+  }) async {
+    debugPrint('Attempting login for: $user');
     try {
       final response = await http.post(
         Uri.parse(ApiConfig.authLogin),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'code': user, 'password': pass}),
+        body: jsonEncode({
+          'username': user, // Backend expects 'username' (email or userId)
+          'password': pass,
+          'role': role, // Backend expects 'role'
+        }),
       );
+
+      debugPrint('Login response status: ${response.statusCode}');
+      debugPrint('Login response body: ${response.body}');
 
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
@@ -36,70 +45,40 @@ class AuthService {
 
           userId = data['code'];
           dbId = data['id']; // Stored as 'id' in backend response
-          token = body['token']; // If backend sends token
+          token = data['token']; // The token is inside the data object
           firstName = data['name'] ?? '';
-          role = data['role'] ?? '';
+          AuthService.role = data['role'] ?? ''; // Use static member
           branchId = data['branchId'] ?? '';
           branchName = data['branchName'] ?? '';
           email = data['email'] ?? '';
           mobile = data['phone'] ?? '';
 
+          if (token != null) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('token', token!);
+            await prefs.setString('user_role', AuthService.role);
+            await prefs.setString('user_branch_id', branchId);
+            debugPrint('Token saved to storage');
+          }
+
           return true;
         }
       }
 
-      // Fallback to mock for development if API is unreachable/failing
-      if (user == _mockUser && pass == _mockPass) {
-        userId = _mockUser;
-        firstName = 'Admin';
-        role = 'Manager';
-        return true;
-      }
+      debugPrint('Login failed: ${response.statusCode} - ${response.body}');
+      return false;
     } catch (e) {
-      debugPrint('Login Error: $e');
-      // Fallback to mock on error
-      if (user == _mockUser && pass == _mockPass) {
-        userId = _mockUser;
-        firstName = 'Admin';
-        role = 'Manager';
-        return true;
-      }
+      debugPrint('CRITICAL LOGIN ERROR: $e');
+      return false;
     }
-    return false;
   }
 
-  // Deprecated synchronous verify - kept for compatibility if needed, but should use login()
-  static bool verify(String user, String pass) {
-    return user == _mockUser && pass == _mockPass;
-  }
-
-  static Future<bool> changePassword(String newPassword) async {
+  static Future<bool> changePassword(
+    String oldPassword,
+    String newPassword,
+  ) async {
     try {
-      // Determine correct endpoint in future if needed, for now use auth path
-      // Note: Backend endpoint is /api/auth/change-password
       final url = Uri.parse('${ApiConfig.baseUrl}/auth/change-password');
-
-      // Need ID. For managers it's _id (which we stored in token or separate field?
-      // In login we stored userId = code. We need the database _id.
-      // Let's assume we might need to fetch profile or store _id in login.
-      // Checking login logic: data['id'] = user._id.toString(). So we have it?
-      // Actually AuthService.userId stores 'code'.
-      // We might need to store the actual DB ID.
-
-      // Let's check where to get the DB ID.
-      // In login: `userId = data['code'];` -> this is the user-facing ID (e.g. M001).
-      // We need the Mongo _id.
-      // Let's look at `getProfile` or login response handling again.
-      // It seems we might not be storing the Mongo ID in a static field accessible here easily
-      // unless we add it.
-
-      // Temporary fix: Use the code/userId if backend supports it, OR
-      // update login to store dbId.
-      // Backend expects: { id, role, newPassword }. 'id' is expected to be _id.
-
-      // Since I can't easily change AuthService state management structure right now without risk,
-      // I will rely on the fact that for now we might have to use a lookup or add a field.
-      // Let's add `static String? dbId;` to AuthService.
 
       if (dbId == null) {
         debugPrint('Error: User DB ID not found');
@@ -114,9 +93,8 @@ class AuthService {
         },
         body: jsonEncode({
           'id': dbId,
-          'role': role == 'Manager'
-              ? 'manager'
-              : 'field_visitor', // Normalize role
+          'role': role == 'Manager' ? 'manager' : 'field_visitor',
+          'oldPassword': oldPassword,
           'newPassword': newPassword,
         }),
       );
@@ -133,8 +111,12 @@ class AuthService {
     }
   }
 
+  static Future<void> resetPassword(String newPassword) async {
+    debugPrint('Mock Password Reset: $newPassword');
+  }
+
   static String generateOtp() {
-    return '1234'; // Mock for now, or implement SMS API
+    return '1234';
   }
 
   static bool verifyOtp(String enteredOtp) {
@@ -170,11 +152,13 @@ class AuthService {
     if (newAvatarPath != null) avatarPath = newAvatarPath;
   }
 
-  static void logout() {
+  static Future<void> logout() async {
     userId = null;
     dbId = null;
     token = null;
     firstName = '';
     role = '';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
   }
 }

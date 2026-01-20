@@ -31,6 +31,13 @@ class Employee {
   String accountNo;
   String accountHolder;
 
+  // Personal Details
+  String nic;
+  String civilStatus;
+  String postalAddress;
+  String permanentAddress;
+  String education; // Stored as a simple string summary for now
+
   Employee({
     this.userId = '',
     this.id = '',
@@ -52,6 +59,11 @@ class Employee {
     this.bankBranch = '',
     this.accountNo = '',
     this.accountHolder = '',
+    this.nic = '',
+    this.civilStatus = '',
+    this.postalAddress = '',
+    this.permanentAddress = '',
+    this.education = '',
   });
 
   // Calculate working period in days from joinedDate to today
@@ -66,7 +78,7 @@ class Employee {
       if (id.isNotEmpty) '_id': id,
       'userId': userId,
       'fullName': fullName,
-      'name': fullName, // Backend expects 'name' for some models
+      'name': fullName,
       'email': email,
       'phone': phone,
       'dob': dob.toIso8601String(),
@@ -94,6 +106,12 @@ class Employee {
       'accountNo': accountNo,
       'accountHolder': accountHolder,
       'password': password,
+
+      'nic': nic,
+      'civilStatus': civilStatus,
+      'postalAddress': postalAddress,
+      'permanentAddress': permanentAddress,
+      'education': education,
     };
   }
 
@@ -105,7 +123,9 @@ class Employee {
     String r = m['role'] as String? ?? type;
     if (r == 'manager') r = 'Branch Manager';
     if (r == 'field_visitor') r = 'Field Visitor';
+    if (r == 'it_sector') r = 'IT Sector';
     if (r == 'branch_manager') r = 'Manager';
+    if (r == 'it_sector') r = 'IT Sector';
 
     String name = m['fullName'] as String? ?? m['name'] as String? ?? '';
     String uId = m['userId'] as String? ?? m['code'] as String? ?? '';
@@ -130,6 +150,19 @@ class Employee {
       accHolder = m['accountHolder'] as String? ?? '';
     }
 
+    // Education might be an object or string
+    String edu = '';
+    if (m['education'] != null) {
+      if (m['education'] is Map) {
+        // Quick resume: e.g., "OL: Passed, AL: Passed"
+        final eMap = m['education'];
+        edu =
+            'OL: ${eMap['ol'] != null ? "Yes" : "-"}, AL: ${eMap['al'] != null ? "Yes" : "-"}';
+      } else {
+        edu = m['education'].toString();
+      }
+    }
+
     return Employee(
       userId: uId,
       id: m['_id']?.toString() ?? '',
@@ -151,6 +184,12 @@ class Employee {
       bankBranch: bBranch,
       accountNo: accNo,
       accountHolder: accHolder,
+
+      nic: m['nic'] as String? ?? '',
+      civilStatus: m['civilStatus'] as String? ?? '',
+      postalAddress: m['postalAddress'] as String? ?? '',
+      permanentAddress: m['permanentAddress'] as String? ?? '',
+      education: edu,
     );
   }
 
@@ -208,6 +247,17 @@ class EmployeeService {
               );
             }
           }
+          // IT Sector
+          if (data['itSectors'] != null) {
+            for (final it in data['itSectors']) {
+              _employees.add(
+                Employee.fromJson(
+                  it as Map<String, dynamic>,
+                  type: 'IT Sector',
+                ),
+              );
+            }
+          }
         }
       }
     } catch (e) {
@@ -220,15 +270,23 @@ class EmployeeService {
   static Future<void> addEmployee(Employee e) async {
     try {
       String url = '';
-      if (e.role == 'Branch Manager' || e.role == 'IT Sector') {
+      if (e.role == 'Branch Manager') {
         url = _authRegisterUrl;
+      } else if (e.role == 'IT Sector') {
+        url = ApiConfig.authRegisterITSector;
       } else {
         url = _fvUrl;
       }
 
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token') ?? '';
+
       final response = await http.post(
         Uri.parse(url),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
         body: jsonEncode(e.toJson()),
       );
 
@@ -236,9 +294,41 @@ class EmployeeService {
         await fetchEmployees();
       } else {
         debugPrint('Failed to add employee: ${response.body}');
+        throw Exception('Failed to add employee: ${response.body}');
       }
     } catch (err) {
       debugPrint('Error adding employee: $err');
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> importITSectorExcel(
+    List<Map<String, dynamic>> rows,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token') ?? '';
+
+      final response = await http.post(
+        Uri.parse(ApiConfig.itSectorImport),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'rows': rows}),
+      );
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        await fetchEmployees(); // Refresh list
+        return body;
+      } else {
+        debugPrint('Failed to import Excel: ${response.body}');
+        throw Exception('Failed to import Excel: ${response.body}');
+      }
+    } catch (err) {
+      debugPrint('Error importing Excel: $err');
+      rethrow;
     }
   }
 
@@ -310,9 +400,7 @@ class EmployeeService {
 
       if (existing.id.isEmpty) {
         debugPrint('Delete failed: Employee not found locally with ID $id');
-        // Force refresh just in case
-        await fetchEmployees();
-        return;
+        throw Exception('Employee not found');
       }
 
       String url = '';
@@ -323,17 +411,39 @@ class EmployeeService {
       }
 
       debugPrint('Sending DELETE request to: $url');
-      final response = await http.delete(Uri.parse(url));
+
+      // Get authentication token
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token') ?? '';
+
+      if (token.isEmpty) {
+        throw Exception('No authentication token. Please log in again.');
+      }
+
+      final response = await http.delete(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
       debugPrint('Delete response status: ${response.statusCode}');
+      debugPrint('Delete response body: ${response.body}');
 
       if (response.statusCode == 200) {
+        // Remove from local cache
         _employees.removeWhere((e) => e.id == existing.id);
         debugPrint('Employee deleted successfully locally');
+
+        // Refresh from server to ensure sync
+        await fetchEmployees();
       } else {
         debugPrint('Delete API failed: ${response.body}');
+        throw Exception('Delete failed: ${response.body}');
       }
     } catch (e) {
       debugPrint('Error deleting employee: $e');
+      rethrow;
     }
   }
 

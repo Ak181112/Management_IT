@@ -427,6 +427,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _showChangePasswordDialog() {
+    final oldPassCtrl = TextEditingController();
     final newPassCtrl = TextEditingController();
     final confirmPassCtrl = TextEditingController();
 
@@ -441,6 +442,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            TextField(
+              controller: oldPassCtrl,
+              obscureText: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Old Password',
+                labelStyle: TextStyle(color: Colors.white70),
+                enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white24),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
             TextField(
               controller: newPassCtrl,
               obscureText: true,
@@ -475,10 +489,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
+              final oldPass = oldPassCtrl.text;
               final newPass = newPassCtrl.text;
               final confirmPass = confirmPassCtrl.text;
 
-              if (newPass.isEmpty || confirmPass.isEmpty) {
+              if (oldPass.isEmpty || newPass.isEmpty || confirmPass.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Please fill all fields')),
                 );
@@ -502,7 +517,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               }
 
               // Call API
-              final success = await AuthService.changePassword(newPass);
+              final success = await AuthService.changePassword(
+                oldPass,
+                newPass,
+              );
 
               if (dialogContext.mounted) {
                 Navigator.pop(dialogContext);
@@ -519,7 +537,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Failed to change password'),
+                      content: Text(
+                        'Failed to change password (check old password)',
+                      ),
                       backgroundColor: Colors.red,
                     ),
                   );

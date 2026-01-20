@@ -57,18 +57,16 @@ router.get('/', async (req, res) => {
             Employee.find() // Keep original too just in case
         ]);
 
-        // Combine all results
-        const allEmployees = [
-            ...managers,
-            ...fieldVisitors,
-            ...branchManagers,
-            ...employees
-        ];
-
-        // Sort by creation or join date if possible, otherwise just return
-        // allEmployees.sort((a, b) => b.createdAt - a.createdAt); 
-
-        res.json(allEmployees);
+        // Return structured data as expected by Frontend EmployeeService
+        res.json({
+            success: true,
+            data: {
+                managers,
+                fieldVisitors,
+                branchManagers,
+                employees
+            }
+        });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }

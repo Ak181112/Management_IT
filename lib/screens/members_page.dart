@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
@@ -9,7 +10,11 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../services/member_service.dart';
 import '../services/transaction_service.dart';
-import '../models/transaction.dart';
+import '../models/transaction.dart' as model; // Alias to avoid conflict if any
+import 'package:file_picker/file_picker.dart';
+import 'package:excel/excel.dart' hide Border;
+
+enum SortOption { recent, oldest, highestBought, highestSold }
 
 class MembersPage extends StatefulWidget {
   const MembersPage({super.key});
@@ -20,7 +25,7 @@ class MembersPage extends StatefulWidget {
 
 class _MembersPageState extends State<MembersPage> {
   final TextEditingController _searchCtrl = TextEditingController();
-  String? _filterId;
+  SortOption _sortOption = SortOption.recent;
 
   @override
   void initState() {
@@ -30,10 +35,21 @@ class _MembersPageState extends State<MembersPage> {
     });
   }
 
+  Timer? _debounce;
+
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _debounce?.cancel();
     super.dispose();
+  }
+
+  void _onSearchChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () async {
+      await MemberService.fetchMembers(query: query);
+      setState(() {});
+    });
   }
 
   void _openAddEditDialog({Member? member}) async {
@@ -251,6 +267,125 @@ class _MembersPageState extends State<MembersPage> {
     );
   }
 
+  Future<void> _importExcel() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['xlsx'],
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (c) => const Center(child: CircularProgressIndicator()),
+      );
+
+      final fileBytes = File(result.files.single.path!).readAsBytesSync();
+      final excel = Excel.decodeBytes(fileBytes);
+
+      final List<Map<String, dynamic>> rows = [];
+
+      if (excel.tables.isNotEmpty) {
+        final sheet = excel.tables[excel.tables.keys.first];
+        if (sheet != null) {
+          final headers = sheet
+              .row(0)
+              .map((e) => e?.value?.toString() ?? '')
+              .toList();
+
+          for (int i = 1; i < sheet.maxRows; i++) {
+            final row = sheet.row(i);
+            if (row.every((cell) => cell == null || cell.value == null)) {
+              continue;
+            }
+
+            final Map<String, dynamic> rowData = {};
+            for (int j = 0; j < headers.length && j < row.length; j++) {
+              rowData[headers[j]] = row[j]?.value?.toString();
+            }
+            if (rowData.isNotEmpty) {
+              rows.add(rowData);
+            }
+          }
+        }
+      }
+
+      if (rows.isEmpty) {
+        if (mounted) Navigator.pop(context); // close loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No data found in Excel file')),
+        );
+        return;
+      }
+
+      final stats = await MemberService.importMembersExcel(rows);
+
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading
+
+      final int inserted = stats['data']['insertedCount'] ?? 0;
+      final int updated = stats['data']['updatedCount'] ?? 0;
+      final int skipped = stats['data']['skippedCount'] ?? 0;
+      final List<dynamic> skippedDetails =
+          stats['data']['skippedDetails'] ?? [];
+
+      if (skipped > 0 && skippedDetails.isNotEmpty) {
+        showDialog(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Import Partial/Skipped'),
+            content: SizedBox(
+              height: 200,
+              width: double.maxFinite,
+              child: ListView.builder(
+                itemCount: skippedDetails.length,
+                itemBuilder: (ctx, i) {
+                  final item = skippedDetails[i];
+                  return ListTile(
+                    leading: const Icon(Icons.warning, color: Colors.orange),
+                    title: Text('Row ${item['rowIndex']}'),
+                    subtitle: Text(item['reason'] ?? 'Unknown error'),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(c);
+                  setState(() {});
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Import complete: $inserted inserted, $updated updated, $skipped skipped.',
+            ),
+            backgroundColor: (inserted > 0 || updated > 0)
+                ? Colors.green
+                : Colors.orange,
+          ),
+        );
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) {
+        if (Navigator.canPop(context)) Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   List<int> _monthlyNewMembers() {
     final now = DateTime.now();
     final counts = List<int>.filled(12, 0);
@@ -272,6 +407,7 @@ class _MembersPageState extends State<MembersPage> {
     final total = MemberService.getMembers().length;
     final series = _monthlyNewMembers();
     return Card(
+      color: const Color(0xFF1F2937),
       margin: const EdgeInsets.all(12),
       child: Padding(
         padding: const EdgeInsets.all(12.0),
@@ -284,13 +420,20 @@ class _MembersPageState extends State<MembersPage> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Members', style: GoogleFonts.outfit(fontSize: 14)),
+                    Text(
+                      'Members',
+                      style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        color: Colors.grey[400],
+                      ),
+                    ),
                     const SizedBox(height: 6),
                     Text(
                       '$total',
                       style: GoogleFonts.outfit(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
+                        color: Colors.white,
                       ),
                     ),
                   ],
@@ -444,8 +587,20 @@ class _MembersPageState extends State<MembersPage> {
                             1: FlexColumnWidth(),
                           },
                           children: [
-                            _buildInfoRow('Member ID', member.id),
+                            _buildInfoRow(
+                              'Member Code',
+                              member.memberCode ?? member.id,
+                            ), // Use memberCode prefers
                             _buildInfoRow('Full Name', member.name),
+                            _buildInfoRow(
+                              'Assigned To',
+                              member.fieldVisitorName ?? 'Unknown',
+                            ),
+                            _buildInfoRow('NIC', member.nic ?? '-'),
+                            _buildInfoRow(
+                              'Address',
+                              member.address ?? member.area ?? '-',
+                            ),
                             _buildInfoRow('Contact', member.contact),
                             _buildInfoRow('Email', member.email),
                             _buildInfoRow(
@@ -525,7 +680,7 @@ class _MembersPageState extends State<MembersPage> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        FutureBuilder<List<Transaction>>(
+                        FutureBuilder<List<model.Transaction>>(
                           future: TransactionService.getTransactions(
                             memberId: member.id,
                           ),
@@ -746,8 +901,20 @@ class _MembersPageState extends State<MembersPage> {
                   1: pw.FlexColumnWidth(),
                 },
                 children: [
-                  _buildPdfInfoRow('Member ID', member.id),
+                  _buildPdfInfoRow(
+                    'Member Code',
+                    member.memberCode ?? member.id,
+                  ),
                   _buildPdfInfoRow('Full Name', member.name),
+                  _buildPdfInfoRow(
+                    'Assigned To',
+                    member.fieldVisitorName ?? 'Unknown',
+                  ),
+                  _buildPdfInfoRow('NIC', member.nic ?? '-'),
+                  _buildPdfInfoRow(
+                    'Address',
+                    member.address ?? member.area ?? '-',
+                  ),
                   _buildPdfInfoRow('Contact', member.contact),
                   _buildPdfInfoRow('Email', member.email),
                   _buildPdfInfoRow(
@@ -905,25 +1072,64 @@ class _MembersPageState extends State<MembersPage> {
     );
   }
 
+  List<Member> _getSortedMembers() {
+    final members = MemberService.getMembers();
+    switch (_sortOption) {
+      case SortOption.recent:
+        members.sort(
+          (a, b) => (b.joinedDate ?? DateTime(2000)).compareTo(
+            a.joinedDate ?? DateTime(2000),
+          ),
+        );
+        break;
+      case SortOption.oldest:
+        members.sort(
+          (a, b) => (a.joinedDate ?? DateTime(2000)).compareTo(
+            b.joinedDate ?? DateTime(2000),
+          ),
+        );
+        break;
+      case SortOption.highestBought:
+        members.sort((a, b) => b.totalBought.compareTo(a.totalBought));
+        break;
+      case SortOption.highestSold:
+        members.sort((a, b) => b.totalSold.compareTo(a.totalSold));
+        break;
+    }
+    return members;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final members = MemberService.getMembers();
-    final displayedMembers = (_filterId == null || _filterId!.isEmpty)
-        ? members
-        : members
-              .where((m) => m.id.toLowerCase() == _filterId!.toLowerCase())
-              .toList();
+    // Local filtering removed as service handles it
 
     return Scaffold(
+      backgroundColor: const Color(0xFF111827),
       appBar: AppBar(
         title: Text(
           'Members',
           style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
         ),
+        backgroundColor: const Color(0xFF1F2937),
+        iconTheme: const IconThemeData(color: Colors.white),
+        titleTextStyle: const TextStyle(color: Colors.white, fontSize: 20),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.file_upload),
+            tooltip: 'Import Excel',
+            onPressed: _importExcel,
+          ),
+          IconButton(
+            icon: const Icon(Icons.add_circle),
+            tooltip: 'Add Member',
+            onPressed: () => _openAddEditDialog(),
+          ),
+        ],
       ),
       body: Column(
         children: [
           _buildHeaderSummary(),
+
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8),
             child: Row(
@@ -931,369 +1137,338 @@ class _MembersPageState extends State<MembersPage> {
                 Expanded(
                   child: TextField(
                     controller: _searchCtrl,
-                    style: GoogleFonts.outfit(),
+                    style: GoogleFonts.outfit(color: Colors.white),
                     decoration: InputDecoration(
-                      labelText: 'Search by Member ID (e.g. M123456)',
-                      labelStyle: GoogleFonts.outfit(),
+                      labelText: 'Search by ID or Name',
+                      labelStyle: GoogleFonts.outfit(color: Colors.grey),
+                      filled: true,
+                      fillColor: const Color(0xFF1F2937),
                       border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.search, color: Colors.grey),
                     ),
-                    onChanged: (v) => setState(() => _filterId = v.trim()),
+                    onChanged: _onSearchChanged,
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
                   onPressed: () {
                     _searchCtrl.clear();
-                    setState(() => _filterId = null);
+                    _onSearchChanged('');
                   },
-                  icon: const Icon(Icons.clear),
+                  icon: const Icon(Icons.clear, color: Colors.grey),
+                ),
+                PopupMenuButton<SortOption>(
+                  icon: const Icon(Icons.filter_list, color: Colors.white),
+                  color: const Color(0xFF1F2937),
+                  onSelected: (option) {
+                    setState(() {
+                      _sortOption = option;
+                    });
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: SortOption.recent,
+                      child: Text(
+                        'Newest First',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: SortOption.oldest,
+                      child: Text(
+                        'Oldest First',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: SortOption.highestBought,
+                      child: Text(
+                        'Highest Bought',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: SortOption.highestSold,
+                      child: Text(
+                        'Highest Sold',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: displayedMembers.length,
-              itemBuilder: (context, i) {
-                final m = displayedMembers[i];
-                return Card(
-                  child: Column(
-                    children: [
-                      ListTile(
-                        onTap: () => _showMemberDetails(m),
-                        leading: CircleAvatar(
-                          backgroundColor: Colors.green,
-                          child: Text(
-                            m.name[0].toUpperCase(),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.vertical,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  headingRowColor: WidgetStateProperty.all(
+                    const Color(0xFF374151),
+                  ),
+                  dataRowMinHeight: 60,
+                  dataRowMaxHeight: 60,
+                  columns: [
+                    DataColumn(
+                      label: Text(
+                        'CODE',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'NIC',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'FULL NAME',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'FIELD VISITOR',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'CONTACT',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'ADDRESS',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'EMAIL',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'JOINED DATE',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'BOUGHT (LKR)',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'SOLD (LKR)',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    DataColumn(
+                      label: Text(
+                        'ACTIONS',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                  rows: _getSortedMembers().map((m) {
+                    return DataRow(
+                      cells: [
+                        DataCell(
+                          Text(
+                            m.memberCode?.isNotEmpty == true
+                                ? m.memberCode!
+                                : m.id.length > 8
+                                ? m.id.substring(0, 8)
+                                : m.id,
                             style: GoogleFonts.outfit(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
-                        title: Text(
-                          m.name,
-                          style: GoogleFonts.outfit(
-                            fontWeight: FontWeight.bold,
+                        DataCell(
+                          Text(
+                            m.nic ?? '-',
+                            style: GoogleFonts.outfit(color: Colors.white),
                           ),
                         ),
-                        subtitle: Text(
-                          'Bought: LKR ${m.totalBought.toStringAsFixed(2)} | Sold: LKR ${m.totalSold.toStringAsFixed(2)}\n${m.contact}',
-                          style: GoogleFonts.outfit(color: Colors.grey[700]),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        isThreeLine: true,
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(
-                                Icons.remove_red_eye,
-                                color: Colors.grey,
+                        DataCell(
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            color: const Color(0xFF1F2937),
+                            child: Text(
+                              m.name,
+                              style: GoogleFonts.outfit(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
                               ),
-                              onPressed: () => _showMemberDetails(m),
                             ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.download,
-                                color: Colors.blue,
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            m.fieldVisitorName ?? '-',
+                            style: GoogleFonts.outfit(color: Colors.white),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            m.contact,
+                            style: GoogleFonts.outfit(color: Colors.white),
+                          ),
+                        ),
+                        DataCell(
+                          SizedBox(
+                            width: 150,
+                            child: Text(
+                              m.area ?? m.address ?? '-',
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.outfit(color: Colors.white),
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            m.email,
+                            style: GoogleFonts.outfit(color: Colors.blue[200]),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            m.joinedDate != null
+                                ? DateFormat('yyyy-MM-dd').format(m.joinedDate!)
+                                : '-',
+                            style: GoogleFonts.outfit(color: Colors.white),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            m.totalBought.toStringAsFixed(2),
+                            style: GoogleFonts.outfit(
+                              color: Colors.greenAccent,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            m.totalSold.toStringAsFixed(2),
+                            style: GoogleFonts.outfit(
+                              color: Colors.orangeAccent,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.remove_red_eye,
+                                  color: Colors.grey,
+                                ),
+                                onPressed: () => _showMemberDetails(m),
                               ),
-                              onPressed: () => _generateAndDownloadPdf(m),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.edit, color: Colors.blue),
-                              onPressed: () => _openAddEditDialog(member: m),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.red),
-                              onPressed: () async {
-                                final ok = await showDialog<bool>(
-                                  context: context,
-                                  builder: (c) => AlertDialog(
-                                    title: const Text('Delete'),
-                                    content: const Text('Delete this member?'),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.of(c).pop(false),
-                                        child: const Text('Cancel'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.of(c).pop(true),
-                                        child: const Text('Delete'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                                if (ok == true) {
-                                  MemberService.deleteMember(m.id);
-                                  setState(() {});
-                                }
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12.0,
-                          vertical: 8.0,
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                icon: const Icon(Icons.shopping_cart),
-                                label: const Text('Add Buy'),
-                                onPressed: () {
-                                  final amountCtrl = TextEditingController();
-                                  final descCtrl = TextEditingController();
-                                  final productCtrl = TextEditingController();
-
-                                  showDialog<void>(
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.download,
+                                  color: Colors.blue,
+                                ),
+                                onPressed: () => _generateAndDownloadPdf(m),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.edit,
+                                  color: Colors.blue,
+                                ),
+                                onPressed: () => _openAddEditDialog(member: m),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.delete,
+                                  color: Colors.red,
+                                ),
+                                onPressed: () async {
+                                  final ok = await showDialog<bool>(
                                     context: context,
-                                    builder: (c) {
-                                      return AlertDialog(
-                                        title: const Text(
-                                          'Add Buy Transaction',
+                                    builder: (c) => AlertDialog(
+                                      title: const Text('Delete'),
+                                      content: const Text(
+                                        'Delete this member?',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.of(c).pop(false),
+                                          child: const Text('Cancel'),
                                         ),
-                                        content: SingleChildScrollView(
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              TextField(
-                                                controller: amountCtrl,
-                                                keyboardType:
-                                                    TextInputType.number,
-                                                decoration:
-                                                    const InputDecoration(
-                                                      labelText: 'Amount (LKR)',
-                                                      border:
-                                                          OutlineInputBorder(),
-                                                    ),
-                                              ),
-                                              const SizedBox(height: 8),
-                                              TextField(
-                                                controller: descCtrl,
-                                                decoration:
-                                                    const InputDecoration(
-                                                      labelText: 'Description',
-                                                      border:
-                                                          OutlineInputBorder(),
-                                                    ),
-                                              ),
-                                              const SizedBox(height: 8),
-                                              TextField(
-                                                controller: productCtrl,
-                                                decoration:
-                                                    const InputDecoration(
-                                                      labelText:
-                                                          'Product (optional)',
-                                                      border:
-                                                          OutlineInputBorder(),
-                                                    ),
-                                              ),
-                                            ],
-                                          ),
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.of(c).pop(true),
+                                          child: const Text('Delete'),
                                         ),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () =>
-                                                Navigator.of(c).pop(),
-                                            child: const Text('Cancel'),
-                                          ),
-                                          TextButton(
-                                            onPressed: () {
-                                              final amount =
-                                                  double.tryParse(
-                                                    amountCtrl.text.trim(),
-                                                  ) ??
-                                                  0.0;
-                                              final desc = descCtrl.text.trim();
-                                              final product = productCtrl.text
-                                                  .trim();
-
-                                              if (amount <= 0) {
-                                                ScaffoldMessenger.of(
-                                                  context,
-                                                ).showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      'Amount must be positive',
-                                                    ),
-                                                  ),
-                                                );
-                                                return;
-                                              }
-                                              if (desc.isEmpty) {
-                                                ScaffoldMessenger.of(
-                                                  context,
-                                                ).showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      'Description is required',
-                                                    ),
-                                                  ),
-                                                );
-                                                return;
-                                              }
-
-                                              MemberService.addTransaction(
-                                                m.id,
-                                                amount: amount,
-                                                type: 'buy',
-                                                description: desc,
-                                                product: product,
-                                              );
-
-                                              setState(() {});
-                                              Navigator.of(c).pop();
-                                            },
-                                            child: const Text('Add'),
-                                          ),
-                                        ],
-                                      );
-                                    },
+                                      ],
+                                    ),
                                   );
+                                  if (ok == true) {
+                                    MemberService.deleteMember(m.id);
+                                    setState(() {});
+                                  }
                                 },
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                icon: const Icon(Icons.local_shipping),
-                                label: const Text('Add Sell'),
-                                onPressed: () {
-                                  final amountCtrl = TextEditingController();
-                                  final descCtrl = TextEditingController();
-                                  final productCtrl = TextEditingController();
-
-                                  showDialog<void>(
-                                    context: context,
-                                    builder: (c) {
-                                      return AlertDialog(
-                                        title: const Text(
-                                          'Add Sell Transaction',
-                                        ),
-                                        content: SingleChildScrollView(
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              TextField(
-                                                controller: amountCtrl,
-                                                keyboardType:
-                                                    TextInputType.number,
-                                                decoration:
-                                                    const InputDecoration(
-                                                      labelText: 'Amount (LKR)',
-                                                      border:
-                                                          OutlineInputBorder(),
-                                                    ),
-                                              ),
-                                              const SizedBox(height: 8),
-                                              TextField(
-                                                controller: descCtrl,
-                                                decoration:
-                                                    const InputDecoration(
-                                                      labelText: 'Description',
-                                                      border:
-                                                          OutlineInputBorder(),
-                                                    ),
-                                              ),
-                                              const SizedBox(height: 8),
-                                              TextField(
-                                                controller: productCtrl,
-                                                decoration:
-                                                    const InputDecoration(
-                                                      labelText:
-                                                          'Product (optional)',
-                                                      border:
-                                                          OutlineInputBorder(),
-                                                    ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () =>
-                                                Navigator.of(c).pop(),
-                                            child: const Text('Cancel'),
-                                          ),
-                                          TextButton(
-                                            onPressed: () {
-                                              final amount =
-                                                  double.tryParse(
-                                                    amountCtrl.text.trim(),
-                                                  ) ??
-                                                  0.0;
-                                              final desc = descCtrl.text.trim();
-                                              final product = productCtrl.text
-                                                  .trim();
-
-                                              if (amount <= 0) {
-                                                ScaffoldMessenger.of(
-                                                  context,
-                                                ).showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      'Amount must be positive',
-                                                    ),
-                                                  ),
-                                                );
-                                                return;
-                                              }
-                                              if (desc.isEmpty) {
-                                                ScaffoldMessenger.of(
-                                                  context,
-                                                ).showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      'Description is required',
-                                                    ),
-                                                  ),
-                                                );
-                                                return;
-                                              }
-
-                                              MemberService.addTransaction(
-                                                m.id,
-                                                amount: amount,
-                                                type: 'sell',
-                                                description: desc,
-                                                product: product,
-                                              );
-
-                                              setState(() {});
-                                              Navigator.of(c).pop();
-                                            },
-                                            child: const Text('Add'),
-                                          ),
-                                        ],
-                                      );
-                                    },
-                                  );
-                                },
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                );
-              },
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
             ),
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'member_fab',
-        onPressed: () => _openAddEditDialog(),
-        child: const Icon(Icons.add),
       ),
     );
   }
